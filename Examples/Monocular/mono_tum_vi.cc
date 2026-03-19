@@ -50,7 +50,10 @@ int main(int argc, char **argv)
 
     if(argc < 4)
     {
-        cerr << endl << "Usage: ./mono_tum_vi path_to_vocabulary path_to_settings path_to_image_folder_1 path_to_times_file_1 (path_to_image_folder_2 path_to_times_file_2 ... path_to_image_folder_N path_to_times_file_N) (trajectory_file_name)" << endl;
+        cerr << endl << "Usage: ./mono_tum_vi path_to_vocabulary path_to_settings\n "   
+                     <<       "path_to_image_folder_1 path_to_times_file_1\n" 
+                     <<         "(path_to_image_folder_2 path_to_times_file_2 ... path_to_image_folder_N path_to_times_file_N)\n" 
+                     <<         "(trajectory_file_name)" << endl;
         return 1;
     }
 
@@ -89,7 +92,7 @@ int main(int argc, char **argv)
     cout.precision(17);
 
     // Create SLAM system. It initializes all system threads and gets ready to process frames.
-    ORB_SLAM3::System SLAM(argv[1],argv[2],ORB_SLAM3::System::MONOCULAR,false, 0, file_name);
+    ORB_SLAM3::System SLAM(argv[1],argv[2],ORB_SLAM3::System::MONOCULAR, true, 0, file_name);
     float imageScale = SLAM.GetImageScale();
 
     double t_resize = 0.f;
