@@ -55,6 +55,8 @@ cv::Mat FrameDrawer::DrawFrame(float imageScale)
     map<long unsigned int, cv::Point2f> mProjectPoints;
     map<long unsigned int, cv::Point2f> mMatchedInImage;
 
+    vector<cv::Rect> vDynamicBoxes;
+
     cv::Scalar standardColor(0,255,0);
     cv::Scalar odometryColor(255,0,0);
 
@@ -66,6 +68,8 @@ cv::Mat FrameDrawer::DrawFrame(float imageScale)
             mState=Tracking::NO_IMAGES_YET;
 
         mIm.copyTo(im);
+
+        vDynamicBoxes = mvDynamicBoxes;
 
         if(mState==Tracking::NOT_INITIALIZED)
         {
@@ -195,10 +199,27 @@ cv::Mat FrameDrawer::DrawFrame(float imageScale)
         }
     }
 
+    
+    for (size_t i = 0; i < vDynamicBoxes.size(); ++i) {
+        cv::Rect box = vDynamicBoxes[i];
+        if (imageScale != 1.f) {
+            box.x = static_cast<int>(box.x / imageScale);
+            box.y = static_cast<int>(box.y / imageScale);
+            box.width = static_cast<int>(box.width / imageScale);
+            box.height = static_cast<int>(box.height / imageScale);
+        }
+        cv::rectangle(im, box, cv::Scalar(0, 255, 0), 2);
+    }
+
     cv::Mat imWithInfo;
     DrawTextInfo(im,state, imWithInfo);
 
     return imWithInfo;
+}
+
+void FrameDrawer::UpdateDynamicBoxes(const std::vector<cv::Rect>& vBoxes) {
+    std::unique_lock<std::mutex> lock(mMutex);
+    mvDynamicBoxes = vBoxes;
 }
 
 cv::Mat FrameDrawer::DrawRightFrame(float imageScale)

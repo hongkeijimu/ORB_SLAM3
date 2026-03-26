@@ -89,12 +89,14 @@ bool SemanticProcessor::InferDummy(const cv::Mat &im, cv::Mat &dynamicMask, cv::
 
     const cv::Rect imageBounds(0, 0, im.cols, im.rows);
 
-    cv::Mat vis;
-    if (im.channels() == 1) {
-        cv::cvtColor(im, vis, cv::COLOR_GRAY2RGB);
-    } else {
-        vis = im.clone();
-    }
+    // cv::Mat vis;
+    // if (im.channels() == 1) {
+    //     cv::cvtColor(im, vis, cv::COLOR_GRAY2RGB);
+    // } else {
+    //     vis = im.clone();
+    // }
+
+    mvDebugBoxes.clear();
 
     for (size_t i = 0; i < testBoxes.size(); ++i)
     {
@@ -105,14 +107,14 @@ bool SemanticProcessor::InferDummy(const cv::Mat &im, cv::Mat &dynamicMask, cv::
         }
 
         semanticLabelMap(roi).setTo(cv::Scalar(1));
-
-        cv::rectangle(vis, roi, cv::Scalar(0, 255, 0), 2);
+        mvDebugBoxes.push_back(roi);
+        // cv::rectangle(vis, roi, cv::Scalar(0, 255, 0), 2);
     }
 
     BuildDynamicMaskFromLabels(semanticLabelMap, dynamicMask);
 
-    cv::imshow("debug", vis);
-    cv::waitKey(1);
+    // cv::imshow("debug", vis);
+    // cv::waitKey(1);
 
     return true;
 }

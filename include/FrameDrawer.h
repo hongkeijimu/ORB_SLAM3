@@ -52,6 +52,8 @@ public:
 
     bool both;
 
+    void UpdateDynamicBoxes(const std::vector<cv::Rect>& vBoxes);
+
 protected:
 
     void DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText);
@@ -73,7 +75,7 @@ protected:
 
     std::mutex mMutex;
     vector<pair<cv::Point2f, cv::Point2f> > mvTracks;
-
+    std::vector<cv::Rect> mvDynamicBoxes;
     Frame mCurrentFrame;
     vector<MapPoint*> mvpLocalMap;
     vector<cv::KeyPoint> mvMatchedKeys;

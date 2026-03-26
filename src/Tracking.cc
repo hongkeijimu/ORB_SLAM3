@@ -585,6 +585,7 @@ void Tracking::RunSemanticIfNeeded(const cv::Mat &im, cv::Mat &dynamicMask, cv::
     {
         cv::Mat newDynamicMask, newSemanticLabelMap;
         bool bOK = mpSemanticProcessor->Infer(im, newDynamicMask, newSemanticLabelMap);
+        mpFrameDrawer->UpdateDynamicBoxes(mpSemanticProcessor->GetDebugBoxes());
         if (bOK && !newDynamicMask.empty())
         {
             mLastDynamicMask = newDynamicMask.clone();

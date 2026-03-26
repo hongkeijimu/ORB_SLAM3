@@ -22,6 +22,7 @@ public:
 
     bool IsDynamicClass(int cls) const;
     bool IsInitialized() const;
+    const std::vector<cv::Rect>& GetDebugBoxes() const {return mvDebugBoxes;}
 
 private:
     bool InferDummy(const cv::Mat &im, cv::Mat &dynamicMask, cv::Mat &semanticLabelMap);
@@ -32,6 +33,7 @@ private:
     std::string mConfigPath;
     std::set<int> mDynamicClasses;
     std::vector<cv::Rect> mvTestBoxes;
+    std::vector<cv::Rect> mvDebugBoxes;
 };
 }
 
