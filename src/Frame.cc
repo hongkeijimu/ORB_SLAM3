@@ -27,8 +27,9 @@
 #include "GeometricCamera.h"
 
 #include <thread>
-#include <include/CameraModels/Pinhole.h>
-#include <include/CameraModels/KannalaBrandt8.h>
+
+#include "CameraModels/KannalaBrandt8.h"
+#include "CameraModels/Pinhole.h"
 
 namespace ORB_SLAM3
 {
@@ -70,6 +71,8 @@ Frame::Frame(const Frame &frame)
      monoLeft(frame.monoLeft), monoRight(frame.monoRight), mvLeftToRightMatch(frame.mvLeftToRightMatch),
      mvRightToLeftMatch(frame.mvRightToLeftMatch), mvStereo3Dpoints(frame.mvStereo3Dpoints),
      mTlr(frame.mTlr), mRlr(frame.mRlr), mtlr(frame.mtlr), mTrl(frame.mTrl),
+     mDynamicMask(frame.mDynamicMask.clone()), mSemanticLabelMap(frame.mSemanticLabelMap.clone()),
+     mvKeyPointSemanticLabels(frame.mvKeyPointSemanticLabels), mvbKeyPointDynamic(frame.mvbKeyPointDynamic),
      mTcw(frame.mTcw), mbHasPose(false), mbHasVelocity(false)
 {
     for(int i=0;i<FRAME_GRID_COLS;i++)
@@ -97,12 +100,15 @@ Frame::Frame(const Frame &frame)
 #endif
 }
 
-
-Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeStamp, ORBextractor* extractorLeft, ORBextractor* extractorRight, ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth, GeometricCamera* pCamera, Frame* pPrevF, const IMU::Calib &ImuCalib)
+//双目
+Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeStamp, ORBextractor* extractorLeft, ORBextractor* extractorRight, ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth, GeometricCamera* pCamera, Frame* pPrevF, const IMU::Calib &ImuCalib, const cv::Mat &dynamicMask, const cv::Mat &semanticLabelMap)
     :mpcpi(NULL), mpORBvocabulary(voc),mpORBextractorLeft(extractorLeft),mpORBextractorRight(extractorRight), mTimeStamp(timeStamp), mK(K.clone()), mK_(Converter::toMatrix3f(K)), mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth),
      mImuCalib(ImuCalib), mpImuPreintegrated(NULL), mpPrevFrame(pPrevF),mpImuPreintegratedFrame(NULL), mpReferenceKF(static_cast<KeyFrame*>(NULL)), mbIsSet(false), mbImuPreintegrated(false),
      mpCamera(pCamera) ,mpCamera2(nullptr), mbHasPose(false), mbHasVelocity(false)
 {
+    mDynamicMask = dynamicMask.clone();
+    mSemanticLabelMap = semanticLabelMap.clone();
+
     // Frame ID
     mnId=nNextId++;
 
@@ -129,6 +135,12 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeSt
     mTimeORB_Ext = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndExtORB - time_StartExtORB).count();
 #endif
 
+    N = mvKeys.size();
+    if(mvKeys.empty())
+        return;
+
+    AssignSemanticLabelsToKeyPoints();
+    FilterDynamicKeyPoints();
     N = mvKeys.size();
     if(mvKeys.empty())
         return;
@@ -197,12 +209,16 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeSt
     AssignFeaturesToGrid();
 }
 
-Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeStamp, ORBextractor* extractor,ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth, GeometricCamera* pCamera,Frame* pPrevF, const IMU::Calib &ImuCalib)
+//RGBD
+Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeStamp, ORBextractor* extractor,ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth, GeometricCamera* pCamera,Frame* pPrevF, const IMU::Calib &ImuCalib, const cv::Mat &dynamicMask, const cv::Mat &semanticLabelMap)
     :mpcpi(NULL),mpORBvocabulary(voc),mpORBextractorLeft(extractor),mpORBextractorRight(static_cast<ORBextractor*>(NULL)),
      mTimeStamp(timeStamp), mK(K.clone()), mK_(Converter::toMatrix3f(K)),mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth),
      mImuCalib(ImuCalib), mpImuPreintegrated(NULL), mpPrevFrame(pPrevF), mpImuPreintegratedFrame(NULL), mpReferenceKF(static_cast<KeyFrame*>(NULL)), mbIsSet(false), mbImuPreintegrated(false),
      mpCamera(pCamera),mpCamera2(nullptr), mbHasPose(false), mbHasVelocity(false)
 {
+    mDynamicMask = dynamicMask.clone();
+    mSemanticLabelMap = semanticLabelMap.clone();
+
     // Frame ID
     mnId=nNextId++;
 
@@ -228,7 +244,12 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeSt
 
 
     N = mvKeys.size();
+    if(mvKeys.empty())
+        return;
 
+    AssignSemanticLabelsToKeyPoints();
+    FilterDynamicKeyPoints();
+    N = mvKeys.size();
     if(mvKeys.empty())
         return;
 
@@ -285,13 +306,17 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeSt
     AssignFeaturesToGrid();
 }
 
-
-Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extractor,ORBVocabulary* voc, GeometricCamera* pCamera, cv::Mat &distCoef, const float &bf, const float &thDepth, Frame* pPrevF, const IMU::Calib &ImuCalib)
+//单目
+Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extractor,ORBVocabulary* voc, GeometricCamera* pCamera, cv::Mat &distCoef, const float &bf, const float &thDepth, Frame* pPrevF, const IMU::Calib &ImuCalib, const cv::Mat &dynamicMask, const cv::Mat &semanticLabelMap)
     :mpcpi(NULL),mpORBvocabulary(voc),mpORBextractorLeft(extractor),mpORBextractorRight(static_cast<ORBextractor*>(NULL)),
      mTimeStamp(timeStamp), mK(static_cast<Pinhole*>(pCamera)->toK()), mK_(static_cast<Pinhole*>(pCamera)->toK_()), mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth),
      mImuCalib(ImuCalib), mpImuPreintegrated(NULL),mpPrevFrame(pPrevF),mpImuPreintegratedFrame(NULL), mpReferenceKF(static_cast<KeyFrame*>(NULL)), mbIsSet(false), mbImuPreintegrated(false), mpCamera(pCamera),
      mpCamera2(nullptr), mbHasPose(false), mbHasVelocity(false)
 {
+    mDynamicMask = dynamicMask.clone();
+    mSemanticLabelMap = semanticLabelMap.clone();
+    mvKeyPointSemanticLabels.clear();
+    mvbKeyPointDynamic.clear();
     // Frame ID
     mnId=nNextId++;
 
@@ -316,6 +341,12 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
 #endif
 
 
+    N = mvKeys.size();
+    if(mvKeys.empty())
+        return;
+
+    AssignSemanticLabelsToKeyPoints();
+    FilterDynamicKeyPoints();
     N = mvKeys.size();
     if(mvKeys.empty())
         return;
@@ -364,8 +395,6 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
     monoLeft = -1;
     monoRight = -1;
 
-    AssignFeaturesToGrid();
-
     if(pPrevF)
     {
         if(pPrevF->HasVelocity())
@@ -379,6 +408,7 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
     }
 
     mpMutexImu = new std::mutex();
+    AssignFeaturesToGrid();
 }
 
 
@@ -422,6 +452,141 @@ void Frame::ExtractORB(int flag, const cv::Mat &im, const int x0, const int x1)
         monoLeft = (*mpORBextractorLeft)(im,cv::Mat(),mvKeys,mDescriptors,vLapping);
     else
         monoRight = (*mpORBextractorRight)(im,cv::Mat(),mvKeysRight,mDescriptorsRight,vLapping);
+}
+
+bool Frame::IsInDynamicMask(const cv::KeyPoint &kp) const
+{
+    if (mDynamicMask.empty())
+    {
+        return false;
+    }
+
+    const int x = cvRound(kp.pt.x);
+    const int y = cvRound(kp.pt.y);
+    if (x < 0 || x >= mDynamicMask.cols || y < 0 || y >= mDynamicMask.rows)
+    {
+        return false;
+    }
+
+    return mDynamicMask.at<uchar>(y, x) > 0;
+}
+
+int Frame::GetSemanticLabel(const cv::KeyPoint &kp) const
+{
+    if (mSemanticLabelMap.empty())
+    {
+        return -1;
+    }
+
+    const int x = cvRound(kp.pt.x);
+    const int y = cvRound(kp.pt.y);
+    if (x < 0 || x >= mSemanticLabelMap.cols || y < 0 || y >= mSemanticLabelMap.rows)
+    {
+        return -1;
+    }
+
+    return static_cast<int>(mSemanticLabelMap.at<uchar>(y, x));
+}
+
+void Frame::AssignSemanticLabelsToKeyPoints()
+{
+    mvKeyPointSemanticLabels.assign(mvKeys.size(), -1);
+    mvbKeyPointDynamic.assign(mvKeys.size(), false);
+
+    if (mDynamicMask.empty() && mSemanticLabelMap.empty())
+    {
+        return;
+    }
+
+    int nDynamic = 0;
+    for (size_t i = 0; i < mvKeys.size(); ++i)
+    {
+        const cv::KeyPoint &kp = mvKeys[i];
+
+        mvKeyPointSemanticLabels[i] = GetSemanticLabel(kp);
+        mvbKeyPointDynamic[i] = IsInDynamicMask(kp);
+        if (mvbKeyPointDynamic[i])
+        {
+            ++nDynamic;
+        }
+    }
+
+    std::cout << "[Frame] total keypoints: " << mvKeys.size()
+              << ", dynamic keypoints: " << nDynamic << std::endl;
+}
+
+void Frame::FilterDynamicKeyPoints()
+{
+    if (mvbKeyPointDynamic.empty())
+    {
+        return;
+    }
+
+    bool hasDynamicKeyPoint = false;
+    for (size_t i = 0; i < mvbKeyPointDynamic.size(); ++i)
+    {
+        if (mvbKeyPointDynamic[i])
+        {
+            hasDynamicKeyPoint = true;
+            break;
+        }
+    }
+
+    if (!hasDynamicKeyPoint)
+    {
+        return;
+    }
+
+    std::vector<cv::KeyPoint> vKeysFiltered;
+    std::vector<cv::KeyPoint> vKeysUnFiltered;
+    std::vector<int> vSemanticLabelsFiltered;
+    std::vector<bool> vDynamicFiltered;
+
+    cv::Mat descriptorsFiltered;
+
+    vKeysFiltered.reserve(mvKeys.size());
+
+    if (!mvKeysUn.empty()) {
+        vKeysUnFiltered.reserve(mvKeysUn.size());
+    }
+    vSemanticLabelsFiltered.reserve(mvKeyPointSemanticLabels.size());
+    vDynamicFiltered.reserve(mvbKeyPointDynamic.size());
+
+    for (size_t i = 0; i < mvKeys.size(); ++i)
+    {
+        if (mvbKeyPointDynamic[i])
+        {
+            continue;
+        }
+
+        vKeysFiltered.push_back(mvKeys[i]);
+        if (!mvKeysUn.empty() && i < mvKeysUn.size())
+        {
+            vKeysUnFiltered.push_back(mvKeysUn[i]);
+        }
+        vSemanticLabelsFiltered.push_back(mvKeyPointSemanticLabels[i]);
+        vDynamicFiltered.push_back(false);
+        if (!mDescriptors.empty())
+        {
+            descriptorsFiltered.push_back(mDescriptors.row(static_cast<int>(i)));
+        }
+    }
+
+    mvKeys.swap(vKeysFiltered);
+    if (!mvKeysUn.empty())
+    {
+        mvKeysUn.swap(vKeysUnFiltered);
+    }
+
+    mvKeyPointSemanticLabels.swap(vSemanticLabelsFiltered);
+    mvbKeyPointDynamic.swap(vDynamicFiltered);
+    if (!mDescriptors.empty())
+    {
+        mDescriptors = descriptorsFiltered.clone();
+    }
+
+    N = static_cast<int>(mvKeys.size());
+    std::cout << "[Frame] filtered keypoints: " << N << std::endl;
 }
 
 bool Frame::isSet() const {
@@ -1031,12 +1196,14 @@ void Frame::setIntegrated()
     mbImuPreintegrated = true;
 }
 
-Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeStamp, ORBextractor* extractorLeft, ORBextractor* extractorRight, ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth, GeometricCamera* pCamera, GeometricCamera* pCamera2, Sophus::SE3f& Tlr,Frame* pPrevF, const IMU::Calib &ImuCalib)
+Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeStamp, ORBextractor* extractorLeft, ORBextractor* extractorRight, ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth, GeometricCamera* pCamera, GeometricCamera* pCamera2, Sophus::SE3f& Tlr,Frame* pPrevF, const IMU::Calib &ImuCalib, const cv::Mat &dynamicMask, const cv::Mat &semanticLabelMap)
         :mpcpi(NULL), mpORBvocabulary(voc),mpORBextractorLeft(extractorLeft),mpORBextractorRight(extractorRight), mTimeStamp(timeStamp), mK(K.clone()), mK_(Converter::toMatrix3f(K)),  mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth),
          mImuCalib(ImuCalib), mpImuPreintegrated(NULL), mpPrevFrame(pPrevF),mpImuPreintegratedFrame(NULL), mpReferenceKF(static_cast<KeyFrame*>(NULL)), mbImuPreintegrated(false), mpCamera(pCamera), mpCamera2(pCamera2),
          mbHasPose(false), mbHasVelocity(false)
 
 {
+    mDynamicMask = dynamicMask.clone();
+    mSemanticLabelMap = semanticLabelMap.clone();
     imgLeft = imLeft.clone();
     imgRight = imRight.clone();
 
@@ -1065,6 +1232,9 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeSt
 
     mTimeORB_Ext = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndExtORB - time_StartExtORB).count();
 #endif
+
+    AssignSemanticLabelsToKeyPoints();
+    FilterDynamicKeyPoints();
 
     Nleft = mvKeys.size();
     Nright = mvKeysRight.size();

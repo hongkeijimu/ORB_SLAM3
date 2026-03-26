@@ -29,6 +29,8 @@
 #include "MLPnPsolver.h"
 #include "GeometricTools.h"
 
+#include "SemanticProcessor.h"
+
 #include <iostream>
 
 #include <mutex>
@@ -114,6 +116,26 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
         else
         {
             std::cout << " is unknown" << std::endl;
+        }
+    }
+
+    mpSemanticProcessor = nullptr;
+    mbUseSemanticMask = true;
+    mnSemanticInferStride = 3;
+    mnLastSemanticFrameId = 0;
+    mLastDynamicMask.release();
+    mLastSemanticLabelMap.release();
+
+    if (mbUseSemanticMask) {
+        mpSemanticProcessor = new SemanticProcessor();
+        bool bSemanticOK = mpSemanticProcessor->Initialize();
+        if (!bSemanticOK) {
+            std::cerr << "[Tracking] SemanticProcessor initialize failed. Semantic mask disabled." << std::endl;
+            delete mpSemanticProcessor;
+            mpSemanticProcessor = nullptr;
+            mbUseSemanticMask = false;
+        } else {
+            std::cerr << "[Tracking] SemanticProcessor initialized." << std::endl;
         }
     }
 
@@ -529,7 +551,57 @@ void Tracking::PrintTimeStats()
 Tracking::~Tracking()
 {
     //f_track_stats.close();
+    if (mpSemanticProcessor) {
+        delete mpSemanticProcessor;
+        mpSemanticProcessor = nullptr;
+    }
 
+}
+
+void Tracking::RunSemanticIfNeeded(const cv::Mat &im, cv::Mat &dynamicMask, cv::Mat &semanticLabelMap)
+{
+    dynamicMask.release();
+    semanticLabelMap.release();
+
+    if (!mbUseSemanticMask || !mpSemanticProcessor || im.empty())
+    {
+        return;
+    }
+
+    const unsigned long nextFrameId = Frame::nNextId;
+    const unsigned long inferStride = mnSemanticInferStride > 0 ? static_cast<unsigned long>(mnSemanticInferStride) : 1ul;
+
+    bool bNeedInfer = false;
+    if (mLastDynamicMask.empty() || mLastSemanticLabelMap.empty())
+    {
+        bNeedInfer = true;
+    }
+    else if (nextFrameId >= mnLastSemanticFrameId + inferStride)
+    {
+        bNeedInfer = true;
+    }
+
+    if (bNeedInfer)
+    {
+        cv::Mat newDynamicMask, newSemanticLabelMap;
+        bool bOK = mpSemanticProcessor->Infer(im, newDynamicMask, newSemanticLabelMap);
+        if (bOK && !newDynamicMask.empty())
+        {
+            mLastDynamicMask = newDynamicMask.clone();
+            mLastSemanticLabelMap = newSemanticLabelMap.clone();
+        }
+        else
+        {
+            std::cerr << "[Tracking] Semantic inference failed, fallback to empty mask." << std::endl;
+            mLastDynamicMask = cv::Mat::zeros(im.rows, im.cols, CV_8UC1);
+            mLastSemanticLabelMap = cv::Mat::zeros(im.rows, im.cols, CV_8UC1);
+        }
+
+        mnLastSemanticFrameId = nextFrameId;
+    }
+
+    dynamicMask = mLastDynamicMask.clone();
+    semanticLabelMap = mLastSemanticLabelMap.clone();
 }
 
 void Tracking::newParameterLoader(Settings *settings) {
@@ -1455,6 +1527,7 @@ Sophus::SE3f Tracking::GrabImageStereo(const cv::Mat &imRectLeft, const cv::Mat 
 {
     //cout << "GrabImageStereo" << endl;
 
+    cv::Mat imColorLeft = imRectLeft.clone();
     mImGray = imRectLeft;
     cv::Mat imGrayRight = imRectRight;
     mImRight = imRectRight;
@@ -1490,14 +1563,17 @@ Sophus::SE3f Tracking::GrabImageStereo(const cv::Mat &imRectLeft, const cv::Mat 
 
     //cout << "Incoming frame creation" << endl;
 
+    cv::Mat dynamicMask, semanticLabelMap;
+    RunSemanticIfNeeded(imColorLeft, dynamicMask, semanticLabelMap);
+
     if (mSensor == System::STEREO && !mpCamera2)
-        mCurrentFrame = Frame(mImGray,imGrayRight,timestamp,mpORBextractorLeft,mpORBextractorRight,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera);
+        mCurrentFrame = Frame(mImGray,imGrayRight,timestamp,mpORBextractorLeft,mpORBextractorRight,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera,nullptr,IMU::Calib(),dynamicMask,semanticLabelMap);
     else if(mSensor == System::STEREO && mpCamera2)
-        mCurrentFrame = Frame(mImGray,imGrayRight,timestamp,mpORBextractorLeft,mpORBextractorRight,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera,mpCamera2,mTlr);
+        mCurrentFrame = Frame(mImGray,imGrayRight,timestamp,mpORBextractorLeft,mpORBextractorRight,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera,mpCamera2,mTlr,nullptr,IMU::Calib(),dynamicMask,semanticLabelMap);
     else if(mSensor == System::IMU_STEREO && !mpCamera2)
-        mCurrentFrame = Frame(mImGray,imGrayRight,timestamp,mpORBextractorLeft,mpORBextractorRight,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera,&mLastFrame,*mpImuCalib);
+        mCurrentFrame = Frame(mImGray,imGrayRight,timestamp,mpORBextractorLeft,mpORBextractorRight,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera,&mLastFrame,*mpImuCalib,dynamicMask,semanticLabelMap);
     else if(mSensor == System::IMU_STEREO && mpCamera2)
-        mCurrentFrame = Frame(mImGray,imGrayRight,timestamp,mpORBextractorLeft,mpORBextractorRight,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera,mpCamera2,mTlr,&mLastFrame,*mpImuCalib);
+        mCurrentFrame = Frame(mImGray,imGrayRight,timestamp,mpORBextractorLeft,mpORBextractorRight,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera,mpCamera2,mTlr,&mLastFrame,*mpImuCalib,dynamicMask,semanticLabelMap);
 
     //cout << "Incoming frame ended" << endl;
 
@@ -1519,6 +1595,7 @@ Sophus::SE3f Tracking::GrabImageStereo(const cv::Mat &imRectLeft, const cv::Mat 
 
 Sophus::SE3f Tracking::GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, const double &timestamp, string filename)
 {
+    cv::Mat imColor = imRGB.clone();
     mImGray = imRGB;
     cv::Mat imDepth = imD;
 
@@ -1540,10 +1617,13 @@ Sophus::SE3f Tracking::GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, co
     if((fabs(mDepthMapFactor-1.0f)>1e-5) || imDepth.type()!=CV_32F)
         imDepth.convertTo(imDepth,CV_32F,mDepthMapFactor);
 
+    cv::Mat dynamicMask, semanticLabelMap;
+    RunSemanticIfNeeded(imColor, dynamicMask, semanticLabelMap);
+
     if (mSensor == System::RGBD)
-        mCurrentFrame = Frame(mImGray,imDepth,timestamp,mpORBextractorLeft,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera);
+        mCurrentFrame = Frame(mImGray,imDepth,timestamp,mpORBextractorLeft,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera,nullptr,IMU::Calib(),dynamicMask,semanticLabelMap);
     else if(mSensor == System::IMU_RGBD)
-        mCurrentFrame = Frame(mImGray,imDepth,timestamp,mpORBextractorLeft,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera,&mLastFrame,*mpImuCalib);
+        mCurrentFrame = Frame(mImGray,imDepth,timestamp,mpORBextractorLeft,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera,&mLastFrame,*mpImuCalib,dynamicMask,semanticLabelMap);
 
 
 
@@ -1565,6 +1645,7 @@ Sophus::SE3f Tracking::GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, co
 
 Sophus::SE3f Tracking::GrabImageMonocular(const cv::Mat &im, const double &timestamp, string filename)
 {
+    cv::Mat imColor = im.clone();
     mImGray = im;
     if(mImGray.channels()==3)
     {
@@ -1581,21 +1662,24 @@ Sophus::SE3f Tracking::GrabImageMonocular(const cv::Mat &im, const double &times
             cvtColor(mImGray,mImGray,cv::COLOR_BGRA2GRAY);
     }
 
+    cv::Mat dynamicMask, semanticLabelMap;
+    RunSemanticIfNeeded(imColor, dynamicMask, semanticLabelMap);
+
     if (mSensor == System::MONOCULAR)
     {
         if(mState==NOT_INITIALIZED || mState==NO_IMAGES_YET ||(lastID - initID) < mMaxFrames)
-            mCurrentFrame = Frame(mImGray,timestamp,mpIniORBextractor,mpORBVocabulary,mpCamera,mDistCoef,mbf,mThDepth);
+            mCurrentFrame = Frame(mImGray,timestamp,mpIniORBextractor,mpORBVocabulary,mpCamera,mDistCoef,mbf,mThDepth,nullptr,IMU::Calib(),dynamicMask,semanticLabelMap);
         else
-            mCurrentFrame = Frame(mImGray,timestamp,mpORBextractorLeft,mpORBVocabulary,mpCamera,mDistCoef,mbf,mThDepth);
+            mCurrentFrame = Frame(mImGray,timestamp,mpORBextractorLeft,mpORBVocabulary,mpCamera,mDistCoef,mbf,mThDepth,nullptr,IMU::Calib(),dynamicMask,semanticLabelMap);
     }
     else if(mSensor == System::IMU_MONOCULAR)
     {
         if(mState==NOT_INITIALIZED || mState==NO_IMAGES_YET)
         {
-            mCurrentFrame = Frame(mImGray,timestamp,mpIniORBextractor,mpORBVocabulary,mpCamera,mDistCoef,mbf,mThDepth,&mLastFrame,*mpImuCalib);
+            mCurrentFrame = Frame(mImGray,timestamp,mpIniORBextractor,mpORBVocabulary,mpCamera,mDistCoef,mbf,mThDepth,&mLastFrame,*mpImuCalib, dynamicMask, semanticLabelMap);
         }
         else
-            mCurrentFrame = Frame(mImGray,timestamp,mpORBextractorLeft,mpORBVocabulary,mpCamera,mDistCoef,mbf,mThDepth,&mLastFrame,*mpImuCalib);
+            mCurrentFrame = Frame(mImGray,timestamp,mpORBextractorLeft,mpORBVocabulary,mpCamera,mDistCoef,mbf,mThDepth,&mLastFrame,*mpImuCalib, dynamicMask, semanticLabelMap);
     }
 
     if (mState==NO_IMAGES_YET)

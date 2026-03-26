@@ -576,6 +576,11 @@ void System::SaveTrajectoryTUM(const string &filename)
     }
 
     vector<KeyFrame*> vpKFs = mpAtlas->GetAllKeyFrames();
+    if(vpKFs.empty())
+    {
+        cout << "No keyframes available. Skip saving trajectory." << endl;
+        return;
+    }
     sort(vpKFs.begin(),vpKFs.end(),KeyFrame::lId);
 
     // Transform all keyframes so that the first keyframe is at the origin.
@@ -631,6 +636,11 @@ void System::SaveKeyFrameTrajectoryTUM(const string &filename)
     cout << endl << "Saving keyframe trajectory to " << filename << " ..." << endl;
 
     vector<KeyFrame*> vpKFs = mpAtlas->GetAllKeyFrames();
+    if(vpKFs.empty())
+    {
+        cout << "No keyframes available. Skip saving keyframe trajectory." << endl;
+        return;
+    }
     sort(vpKFs.begin(),vpKFs.end(),KeyFrame::lId);
 
     // Transform all keyframes so that the first keyframe is at the origin.
@@ -671,7 +681,7 @@ void System::SaveTrajectoryEuRoC(const string &filename)
 
     vector<Map*> vpMaps = mpAtlas->GetAllMaps();
     int numMaxKFs = 0;
-    Map* pBiggerMap;
+    Map* pBiggerMap = static_cast<Map*>(NULL);
     std::cout << "There are " << std::to_string(vpMaps.size()) << " maps in the atlas" << std::endl;
     for(Map* pMap :vpMaps)
     {
@@ -681,6 +691,12 @@ void System::SaveTrajectoryEuRoC(const string &filename)
             numMaxKFs = pMap->GetAllKeyFrames().size();
             pBiggerMap = pMap;
         }
+    }
+
+    if(!pBiggerMap || numMaxKFs == 0)
+    {
+        cout << "No keyframes available. Skip saving trajectory." << endl;
+        return;
     }
 
     vector<KeyFrame*> vpKFs = pBiggerMap->GetAllKeyFrames();
@@ -1059,7 +1075,7 @@ void System::SaveKeyFrameTrajectoryEuRoC(const string &filename)
     cout << endl << "Saving keyframe trajectory to " << filename << " ..." << endl;
 
     vector<Map*> vpMaps = mpAtlas->GetAllMaps();
-    Map* pBiggerMap;
+    Map* pBiggerMap = static_cast<Map*>(NULL);
     int numMaxKFs = 0;
     for(Map* pMap :vpMaps)
     {
@@ -1073,6 +1089,12 @@ void System::SaveKeyFrameTrajectoryEuRoC(const string &filename)
     if(!pBiggerMap)
     {
         std::cout << "There is not a map!!" << std::endl;
+        return;
+    }
+
+    if(numMaxKFs == 0)
+    {
+        std::cout << "No keyframes available. Skip saving keyframe trajectory." << std::endl;
         return;
     }
 
@@ -1213,6 +1235,11 @@ void System::SaveTrajectoryKITTI(const string &filename)
     }
 
     vector<KeyFrame*> vpKFs = mpAtlas->GetAllKeyFrames();
+    if(vpKFs.empty())
+    {
+        cout << "No keyframes available. Skip saving trajectory." << endl;
+        return;
+    }
     sort(vpKFs.begin(),vpKFs.end(),KeyFrame::lId);
 
     // Transform all keyframes so that the first keyframe is at the origin.
@@ -1546,4 +1573,3 @@ string System::CalculateCheckSum(string filename, int type)
 }
 
 } //namespace ORB_SLAM
-

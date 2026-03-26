@@ -1,24 +1,37 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-`src/` contains the core SLAM pipeline implementation; matching public headers live in `include/` (plus `include/CameraModels/`). Executable entry points and dataset configs are under `Examples/`, grouped by sensor mode (`Monocular`, `Stereo`, `RGB-D`, `*-Inertial`). Legacy demos are in `Examples_old/`. Third-party code is vendored in `Thirdparty/` (`DBoW2`, `g2o`, `Sophus`) and should only be changed when updating dependencies. Evaluation utilities and ground-truth files are in `evaluation/`. Runtime vocabulary assets are in `Vocabulary/` (`ORBvoc.txt.tar.gz`).
+`src/` contains the core SLAM implementation; matching public headers live in `include/`, with camera models under `include/CameraModels/` and `src/CameraModels/`. `Examples/` holds current standalone demos and YAML configs for Monocular, Stereo, RGB-D, inertial, and calibration workflows. `Examples_old/` preserves legacy demos and the ROS package in `Examples_old/ROS/ORB_SLAM3`. Vendored dependencies live in `Thirdparty/` (`DBoW2`, `g2o`, `Sophus`); avoid changing them unless you are updating a dependency. Generated outputs land in `build/`, `lib/`, and runtime files such as `CameraTrajectory.txt`.
 
 ## Build, Test, and Development Commands
-- `./build.sh`: builds third-party libs, extracts the vocabulary, and compiles `lib/libORB_SLAM3.so` plus demo binaries.
-- `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j4`: manual/incremental build flow.
-- `./Examples/Stereo/stereo_euroc Vocabulary/ORBvoc.txt Examples/Stereo/EuRoC.yaml <euroc_seq_dir> Examples/Stereo/EuRoC_TimeStamps/MH01.txt`: representative local run.
-- `python2 evaluation/evaluate_ate_scale.py <groundtruth.txt> <estimated_traj.txt> --verbose`: compute trajectory RMSE/scale metrics.
-- `./build_ros.sh`: optional ROS build; requires the ROS package path used by the script to exist in this checkout.
+Use the provided build script for a full local build:
+
+```bash
+./build.sh
+```
+
+This builds `Thirdparty/*`, unpacks `Vocabulary/ORBvoc.txt`, and compiles `lib/libORB_SLAM3.so` plus example binaries.
+
+For iterative work, prefer CMake directly:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j2
+```
+
+ROS support is legacy in this checkout. The package is under `Examples_old/ROS/ORB_SLAM3`; verify `build_ros.sh` before using it.
 
 ## Coding Style & Naming Conventions
-Use C++11 and match existing style: 4-space indentation, braces on the next line for functions, and minimal formatting-only diffs. Keep class/type names in PascalCase (`KeyFrameDatabase`, `MapPoint`) and preserve file pairing (`src/Foo.cc` with `include/Foo.h`; camera models use `.cpp/.h`). Keep code in the `ORB_SLAM3` namespace. No top-level formatter/linter is enforced; if you use one locally, avoid reformatting unrelated code. Do not edit vendored `Thirdparty/` sources unless required.
+Follow the surrounding C++ style: 4-space indentation, opening braces on their own line, and `Type* name` pointer declarations. Keep class and method names in PascalCase (`LocalMapping`, `SaveTrajectoryTUM`), member fields with `m` prefixes (`mpTracker`, `mbReset`), and booleans with `b`/`mb` prefixes. Most core files use `.cc`; add new files with the extension used by the neighboring module. There is no repo-wide formatter configured, so do not reformat unrelated code.
 
 ## Testing Guidelines
-There is no root unit-test target in `CMakeLists.txt`; validation is scenario-based. For algorithm changes, run at least one affected example and verify generated `CameraTrajectory.txt` and `KeyFrameTrajectory.txt`. For quantitative checks, compare ATE outputs from `evaluation/evaluate_ate_scale.py` before and after your change.
+There is no top-level automated test suite or coverage gate. Validate changes by rebuilding and running the closest example binary for the affected sensor path, for example:
+
+```bash
+./Examples/Monocular/mono_tum Vocabulary/ORBvoc.txt Examples/Monocular/TUM1.yaml
+```
+
+If you touch trajectory, timing, or calibration logic, record the dataset used and attach the resulting trajectory or timing artifact in your PR. `Thirdparty/Sophus/test` is upstream vendor coverage, not the main acceptance path here.
 
 ## Commit & Pull Request Guidelines
-Recent history favors short imperative commit subjects (for example, `Fix typos`, `Update README.md`). Prefer `area: imperative summary` for code changes (example: `tracking: reduce map update contention`). In pull requests, include:
-- what changed and why
-- exact run command(s) and dataset/config used
-- before/after metrics or behavioral notes
-- linked issue IDs when applicable
+Recent history uses short, imperative subjects such as `Update README.md` and `Update ROS scripts`. Keep commits focused and descriptive, and separate dependency/vendor changes from core SLAM changes. PRs should include the problem statement, key files changed, exact build/run commands used for validation, dataset or hardware details, and screenshots or trajectory diffs when viewer output or tracking behavior changes.

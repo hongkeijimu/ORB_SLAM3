@@ -53,6 +53,8 @@ class LoopClosing;
 class System;
 class Settings;
 
+class SemanticProcessor;
+
 class Tracking
 {  
 
@@ -229,6 +231,8 @@ protected:
     // Reset IMU biases and compute frame velocity
     void ResetFrameIMU();
 
+    void RunSemanticIfNeeded(const cv::Mat &im, cv::Mat &dynamicMask, cv::Mat &semanticLabelMap);
+
     bool mbMapUpdated;
 
     // Imu preintegration from last frame
@@ -264,6 +268,16 @@ protected:
     //BoW
     ORBVocabulary* mpORBVocabulary;
     KeyFrameDatabase* mpKeyFrameDB;
+
+    //semantic
+    SemanticProcessor* mpSemanticProcessor;
+
+    bool mbUseSemanticMask;
+    int mnSemanticInferStride;
+    long unsigned int mnLastSemanticFrameId;
+
+    cv::Mat mLastDynamicMask;
+    cv::Mat mLastSemanticLabelMap;
 
     // Initalization (only for monocular)
     bool mbReadyToInitializate;
