@@ -73,6 +73,29 @@ namespace ORB_SLAM3
     const int EDGE_THRESHOLD = 19;
 
 
+    static inline bool IsKeyPointMasked(const cv::Mat& Mask, const cv::KeyPoint& kp) {
+        if (Mask.empty()) return false;
+
+        int x = cvRound(kp.pt.x);
+        int y = cvRound(kp.pt.y);
+
+        if (x < 0 || x >= Mask.cols || y < 0 || y >= Mask.rows) return false;
+
+        return Mask.at<uchar>(y, x) > 0;
+    }
+
+    static inline bool IsKeyPointMaskedInLevel(const cv::Mat& Mask, const cv::KeyPoint& kp, float scaleFactor) {
+        if (Mask.empty()) return false;
+
+        int x = cvRound(kp.pt.x * scaleFactor);
+        int y = cvRound(kp.pt.y * scaleFactor);
+
+        if (x < 0 || x >= Mask.cols || y < 0 || y >= Mask.rows) return false;
+
+        return Mask.at<uchar>(y, x) > 0;
+    }
+
+
     static float IC_Angle(const Mat& image, Point2f pt,  const vector<int> & u_max)
     {
         int m_01 = 0, m_10 = 0;
@@ -778,7 +801,7 @@ namespace ORB_SLAM3
         return vResultKeys;
     }
 
-    void ORBextractor::ComputeKeyPointsOctTree(vector<vector<KeyPoint> >& allKeypoints)
+    void ORBextractor::ComputeKeyPointsOctTree(vector<vector<KeyPoint> >& allKeypoints, cv::Mat &Mask)
     {
         allKeypoints.resize(nlevels);
 
@@ -869,6 +892,28 @@ namespace ORB_SLAM3
                     }
 
                 }
+            }
+
+            if (!Mask.empty()) {
+                std::vector<cv::KeyPoint> vFilteredKeys;
+                vFilteredKeys.reserve(vToDistributeKeys.size());
+
+                const float scale = mvScaleFactor[level];
+
+                for (size_t k = 0; k < vToDistributeKeys.size(); ++k) {
+                    const cv::KeyPoint &kp = vToDistributeKeys[k];
+                    cv::KeyPoint kpForMask = kp;
+                    kpForMask.pt.x += minBorderX;
+                    kpForMask.pt.y += minBorderY;
+                    
+
+                    if (IsKeyPointMaskedInLevel(Mask, kpForMask, scale)) {
+                        continue;
+                    }
+
+                    vFilteredKeys.push_back(kp);
+                }
+                vToDistributeKeys.swap(vFilteredKeys);
             }
 
             vector<KeyPoint> & keypoints = allKeypoints[level];
@@ -1091,13 +1136,18 @@ namespace ORB_SLAM3
             return -1;
 
         Mat image = _image.getMat();
+        Mat Mask = _mask.getMat();
         assert(image.type() == CV_8UC1 );
+
+        if (!Mask.empty()) {
+            assert(Mask.type() == CV_8UC1);
+        }
 
         // Pre-compute the scale pyramid
         ComputePyramid(image);
 
         vector < vector<KeyPoint> > allKeypoints;
-        ComputeKeyPointsOctTree(allKeypoints);
+        ComputeKeyPointsOctTree(allKeypoints, Mask);
         //ComputeKeyPointsOld(allKeypoints);
 
         Mat descriptors;

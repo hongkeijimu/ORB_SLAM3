@@ -139,8 +139,9 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeSt
     if(mvKeys.empty())
         return;
 
-    AssignSemanticLabelsToKeyPoints();
-    FilterDynamicKeyPoints();
+    // Old post-extraction semantic filtering is disabled.
+    // AssignSemanticLabelsToKeyPoints();
+    // FilterDynamicKeyPoints();
     N = mvKeys.size();
     if(mvKeys.empty())
         return;
@@ -247,8 +248,9 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeSt
     if(mvKeys.empty())
         return;
 
-    AssignSemanticLabelsToKeyPoints();
-    FilterDynamicKeyPoints();
+    // Old post-extraction semantic filtering is disabled.
+    // AssignSemanticLabelsToKeyPoints();
+    // FilterDynamicKeyPoints();
     N = mvKeys.size();
     if(mvKeys.empty())
         return;
@@ -345,8 +347,9 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
     if(mvKeys.empty())
         return;
 
-    AssignSemanticLabelsToKeyPoints();
-    FilterDynamicKeyPoints();
+    // Old post-extraction semantic filtering is disabled.
+    // AssignSemanticLabelsToKeyPoints();
+    // FilterDynamicKeyPoints();
     N = mvKeys.size();
     if(mvKeys.empty())
         return;
@@ -449,7 +452,7 @@ void Frame::ExtractORB(int flag, const cv::Mat &im, const int x0, const int x1)
 {
     vector<int> vLapping = {x0,x1};
     if(flag==0)
-        monoLeft = (*mpORBextractorLeft)(im,cv::Mat(),mvKeys,mDescriptors,vLapping);
+        monoLeft = (*mpORBextractorLeft)(im,mDynamicMask,mvKeys,mDescriptors,vLapping);
     else
         monoRight = (*mpORBextractorRight)(im,cv::Mat(),mvKeysRight,mDescriptorsRight,vLapping);
 }
@@ -1233,8 +1236,9 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeSt
     mTimeORB_Ext = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndExtORB - time_StartExtORB).count();
 #endif
 
-    AssignSemanticLabelsToKeyPoints();
-    FilterDynamicKeyPoints();
+    // Old post-extraction semantic filtering is disabled.
+    // AssignSemanticLabelsToKeyPoints();
+    // FilterDynamicKeyPoints();
 
     Nleft = mvKeys.size();
     Nright = mvKeysRight.size();
