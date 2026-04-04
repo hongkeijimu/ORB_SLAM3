@@ -208,7 +208,7 @@ cv::Mat FrameDrawer::DrawFrame(float imageScale)
             box.width = static_cast<int>(box.width / imageScale);
             box.height = static_cast<int>(box.height / imageScale);
         }
-        cv::rectangle(im, box, cv::Scalar(0, 255, 0), 2);
+        cv::rectangle(im, box, cv::Scalar(0, 0, 255), 1);
     }
 
     cv::Mat imWithInfo;

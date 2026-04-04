@@ -41,7 +41,8 @@ Verbose::eLevel Verbose::th = Verbose::VERBOSITY_NORMAL;
 System::System(const string &strVocFile, const string &strSettingsFile, const eSensor sensor,
                const bool bUseViewer, const int initFr, const string &strSequence):
     mSensor(sensor), mpViewer(static_cast<Viewer*>(NULL)), mbReset(false), mbResetActiveMap(false),
-    mbActivateLocalizationMode(false), mbDeactivateLocalizationMode(false), mbShutDown(false)
+    mbActivateLocalizationMode(false), mbDeactivateLocalizationMode(false), mbShutDown(false),
+    mptLocalMapping(nullptr), mptLoopClosing(nullptr), mptViewer(nullptr)
 {
     // Output welcome message
     cout << endl <<
@@ -521,29 +522,63 @@ void System::Shutdown()
 
     cout << "Shutdown" << endl;
 
-    mpLocalMapper->RequestFinish();
-    mpLoopCloser->RequestFinish();
-    /*if(mpViewer)
+    if(mpViewer)
     {
         mpViewer->RequestFinish();
+    }
+
+    if(mpLocalMapper)
+    {
+        mpLocalMapper->RequestFinish();
+        mpLocalMapper->Release();
+    }
+
+    if(mpLoopCloser)
+    {
+        mpLoopCloser->RequestFinish();
+    }
+
+    const std::thread::id currentThreadId = std::this_thread::get_id();
+
+    if(mpViewer && mptViewer && currentThreadId != mptViewer->get_id())
+    {
         while(!mpViewer->isFinished())
             usleep(5000);
-    }*/
+    }
 
-    // Wait until all thread have effectively stopped
-    /*while(!mpLocalMapper->isFinished() || !mpLoopCloser->isFinished() || mpLoopCloser->isRunningGBA())
+    while(mpLocalMapper && !mpLocalMapper->isFinished())
     {
-        if(!mpLocalMapper->isFinished())
-            cout << "mpLocalMapper is not finished" << endl;*/
-        /*if(!mpLoopCloser->isFinished())
-            cout << "mpLoopCloser is not finished" << endl;
-        if(mpLoopCloser->isRunningGBA()){
-            cout << "mpLoopCloser is running GBA" << endl;
-            cout << "break anyway..." << endl;
-            break;
-        }*/
-        /*usleep(5000);
-    }*/
+        usleep(5000);
+    }
+
+    while(mpLoopCloser && (!mpLoopCloser->isFinished() || mpLoopCloser->isRunningGBA()))
+    {
+        usleep(5000);
+    }
+
+    if(mptLocalMapping)
+    {
+        if(mptLocalMapping->joinable())
+            mptLocalMapping->join();
+        delete mptLocalMapping;
+        mptLocalMapping = nullptr;
+    }
+
+    if(mptLoopClosing)
+    {
+        if(mptLoopClosing->joinable())
+            mptLoopClosing->join();
+        delete mptLoopClosing;
+        mptLoopClosing = nullptr;
+    }
+
+    if(mptViewer && currentThreadId != mptViewer->get_id())
+    {
+        if(mptViewer->joinable())
+            mptViewer->join();
+        delete mptViewer;
+        mptViewer = nullptr;
+    }
 
     if(!mStrSaveAtlasToFile.empty())
     {

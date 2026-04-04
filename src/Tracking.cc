@@ -121,14 +121,16 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
 
     mpSemanticProcessor = nullptr;
     mbUseSemanticMask = true;
-    mnSemanticInferStride = 3;
+    mnSemanticInferStride = 1;
     mnLastSemanticFrameId = 0;
     mLastDynamicMask.release();
     mLastSemanticLabelMap.release();
 
     if (mbUseSemanticMask) {
         mpSemanticProcessor = new SemanticProcessor();
-        bool bSemanticOK = mpSemanticProcessor->Initialize();
+        const std::string semanticModelPath = "/home/hongkeijimu/desktop/ORB_SLAM3/yolov5s.onnx";
+        const std::string semanticConfigPath = "";
+        bool bSemanticOK = mpSemanticProcessor->Initialize(semanticModelPath, semanticConfigPath);
         if (!bSemanticOK) {
             std::cerr << "[Tracking] SemanticProcessor initialize failed. Semantic mask disabled." << std::endl;
             delete mpSemanticProcessor;
