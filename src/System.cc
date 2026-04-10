@@ -522,6 +522,11 @@ void System::Shutdown()
 
     cout << "Shutdown" << endl;
 
+    if(mpTracker)
+    {
+        mpTracker->ShutdownSemanticThread();
+    }
+
     if(mpViewer)
     {
         mpViewer->RequestFinish();

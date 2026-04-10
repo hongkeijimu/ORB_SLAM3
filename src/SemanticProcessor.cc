@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
@@ -54,8 +55,17 @@ namespace ORB_SLAM3
 
             mpOrtEnv.reset(new Ort::Env(ORT_LOGGING_LEVEL_WARNING, "SemanticProcessor"));
             mSessionOptions = Ort::SessionOptions();
+            mSessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
             mSessionOptions.SetIntraOpNumThreads(1);
-            mSessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
+            mSessionOptions.SetInterOpNumThreads(1);
+
+            OrtCUDAProviderOptions cudaOptions{};
+            cudaOptions.device_id = 0;
+            cudaOptions.arena_extend_strategy = 0;
+            cudaOptions.gpu_mem_limit = std::numeric_limits<size_t>::max();
+            cudaOptions.cudnn_conv_algo_search = OrtCudnnConvAlgoSearchExhaustive;
+            cudaOptions.do_copy_in_default_stream = 1;
+            mSessionOptions.AppendExecutionProvider_CUDA(cudaOptions);
 
             mpOrtSession.reset(new Ort::Session(*mpOrtEnv, mModelPath.c_str(), mSessionOptions));
 
@@ -86,7 +96,8 @@ namespace ORB_SLAM3
             mbInitialized = true;
 
             std::cout << "[SemanticProcessor] Initialize success, mode = real, input = "
-                      << mInputWidth << "x" << mInputHeight << std::endl;
+                      << mInputWidth << "x" << mInputHeight
+                      << ", provider = CUDA" << std::endl;
             return true;
         }
         catch (const std::exception &e)

@@ -123,8 +123,14 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
     mbUseSemanticMask = true;
     mnSemanticInferStride = 1;
     mnLastSemanticFrameId = 0;
+    mnLastSemanticQueuedFrameId = 0;
     mLastDynamicMask.release();
     mLastSemanticLabelMap.release();
+    mvLastSemanticBoxes.clear();
+    mSemanticJobImage.release();
+    mnSemanticJobFrameId = 0;
+    mbSemanticFinishRequested = false;
+    mbSemanticHasJob = false;
 
     if (mbUseSemanticMask) {
         mpSemanticProcessor = new SemanticProcessor();
@@ -138,6 +144,7 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
             mbUseSemanticMask = false;
         } else {
             std::cerr << "[Tracking] SemanticProcessor initialized." << std::endl;
+            mSemanticThread = std::thread(&Tracking::SemanticThreadLoop, this);
         }
     }
 
@@ -553,11 +560,79 @@ void Tracking::PrintTimeStats()
 Tracking::~Tracking()
 {
     //f_track_stats.close();
+    ShutdownSemanticThread();
+
     if (mpSemanticProcessor) {
         delete mpSemanticProcessor;
         mpSemanticProcessor = nullptr;
     }
 
+}
+
+void Tracking::ShutdownSemanticThread()
+{
+    {
+        unique_lock<mutex> lock(mMutexSemantic);
+        mbSemanticFinishRequested = true;
+        mbSemanticHasJob = false;
+    }
+
+    mCondSemantic.notify_all();
+
+    if (mSemanticThread.joinable() && std::this_thread::get_id() != mSemanticThread.get_id())
+    {
+        mSemanticThread.join();
+    }
+}
+
+void Tracking::SemanticThreadLoop()
+{
+    while (true)
+    {
+        cv::Mat jobImage;
+        unsigned long jobFrameId = 0;
+
+        {
+            unique_lock<mutex> lock(mMutexSemantic);
+            mCondSemantic.wait(lock, [this]() {
+                return mbSemanticFinishRequested || mbSemanticHasJob;
+            });
+
+            if (mbSemanticFinishRequested)
+            {
+                break;
+            }
+
+            jobImage = mSemanticJobImage;
+            jobFrameId = mnSemanticJobFrameId;
+            mbSemanticHasJob = false;
+        }
+
+        if (jobImage.empty() || !mpSemanticProcessor)
+        {
+            continue;
+        }
+
+        cv::Mat newDynamicMask, newSemanticLabelMap;
+        bool bOK = mpSemanticProcessor->Infer(jobImage, newDynamicMask, newSemanticLabelMap);
+        std::vector<cv::Rect> debugBoxes = mpSemanticProcessor->GetDebugBoxes();
+
+        if (!bOK || newDynamicMask.empty() || newSemanticLabelMap.empty())
+        {
+            std::cerr << "[Tracking] Semantic inference failed, fallback to empty mask." << std::endl;
+            newDynamicMask = cv::Mat::zeros(jobImage.rows, jobImage.cols, CV_8UC1);
+            newSemanticLabelMap = cv::Mat::zeros(jobImage.rows, jobImage.cols, CV_8UC1);
+            debugBoxes.clear();
+        }
+
+        {
+            unique_lock<mutex> lock(mMutexSemantic);
+            mLastDynamicMask = newDynamicMask.clone();
+            mLastSemanticLabelMap = newSemanticLabelMap.clone();
+            mvLastSemanticBoxes = debugBoxes;
+            mnLastSemanticFrameId = jobFrameId;
+        }
+    }
 }
 
 void Tracking::RunSemanticIfNeeded(const cv::Mat &im, cv::Mat &dynamicMask, cv::Mat &semanticLabelMap)
@@ -573,38 +648,49 @@ void Tracking::RunSemanticIfNeeded(const cv::Mat &im, cv::Mat &dynamicMask, cv::
     const unsigned long nextFrameId = Frame::nNextId;
     const unsigned long inferStride = mnSemanticInferStride > 0 ? static_cast<unsigned long>(mnSemanticInferStride) : 1ul;
 
-    bool bNeedInfer = false;
-    if (mLastDynamicMask.empty() || mLastSemanticLabelMap.empty())
+    std::vector<cv::Rect> dynamicBoxes;
+    bool bHasResult = false;
+    unsigned long lastQueuedFrameId = 0;
+
     {
-        bNeedInfer = true;
+        unique_lock<mutex> lock(mMutexSemantic);
+
+        if (!mLastDynamicMask.empty() && !mLastSemanticLabelMap.empty())
+        {
+            dynamicMask = mLastDynamicMask.clone();
+            semanticLabelMap = mLastSemanticLabelMap.clone();
+            dynamicBoxes = mvLastSemanticBoxes;
+            bHasResult = true;
+        }
+
+        lastQueuedFrameId = mnLastSemanticQueuedFrameId;
     }
-    else if (nextFrameId >= mnLastSemanticFrameId + inferStride)
+
+    bool bNeedInfer = !bHasResult;
+    if (!bNeedInfer && nextFrameId >= lastQueuedFrameId + inferStride)
     {
         bNeedInfer = true;
     }
 
     if (bNeedInfer)
     {
-        cv::Mat newDynamicMask, newSemanticLabelMap;
-        bool bOK = mpSemanticProcessor->Infer(im, newDynamicMask, newSemanticLabelMap);
-        mpFrameDrawer->UpdateDynamicBoxes(mpSemanticProcessor->GetDebugBoxes());
-        if (bOK && !newDynamicMask.empty())
         {
-            mLastDynamicMask = newDynamicMask.clone();
-            mLastSemanticLabelMap = newSemanticLabelMap.clone();
+            unique_lock<mutex> lock(mMutexSemantic);
+            if (!mbSemanticFinishRequested)
+            {
+                mSemanticJobImage = im.clone();
+                mnSemanticJobFrameId = nextFrameId;
+                mnLastSemanticQueuedFrameId = nextFrameId;
+                mbSemanticHasJob = true;
+            }
         }
-        else
-        {
-            std::cerr << "[Tracking] Semantic inference failed, fallback to empty mask." << std::endl;
-            mLastDynamicMask = cv::Mat::zeros(im.rows, im.cols, CV_8UC1);
-            mLastSemanticLabelMap = cv::Mat::zeros(im.rows, im.cols, CV_8UC1);
-        }
-
-        mnLastSemanticFrameId = nextFrameId;
+        mCondSemantic.notify_one();
     }
 
-    dynamicMask = mLastDynamicMask.clone();
-    semanticLabelMap = mLastSemanticLabelMap.clone();
+    if (mpFrameDrawer)
+    {
+        mpFrameDrawer->UpdateDynamicBoxes(dynamicBoxes);
+    }
 }
 
 void Tracking::newParameterLoader(Settings *settings) {

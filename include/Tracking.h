@@ -39,7 +39,9 @@
 
 #include "GeometricCamera.h"
 
+#include <condition_variable>
 #include <mutex>
+#include <thread>
 #include <unordered_set>
 
 namespace ORB_SLAM3
@@ -109,6 +111,7 @@ public:
     void SaveSubTrajectory(string strNameFile_frames, string strNameFile_kf, Map* pMap);
 
     float GetImageScale();
+    void ShutdownSemanticThread();
 
 #ifdef REGISTER_LOOP
     void RequestStop();
@@ -232,6 +235,7 @@ protected:
     void ResetFrameIMU();
 
     void RunSemanticIfNeeded(const cv::Mat &im, cv::Mat &dynamicMask, cv::Mat &semanticLabelMap);
+    void SemanticThreadLoop();
 
     bool mbMapUpdated;
 
@@ -275,9 +279,19 @@ protected:
     bool mbUseSemanticMask;
     int mnSemanticInferStride;
     long unsigned int mnLastSemanticFrameId;
+    long unsigned int mnLastSemanticQueuedFrameId;
 
     cv::Mat mLastDynamicMask;
     cv::Mat mLastSemanticLabelMap;
+    std::vector<cv::Rect> mvLastSemanticBoxes;
+
+    std::thread mSemanticThread;
+    std::mutex mMutexSemantic;
+    std::condition_variable mCondSemantic;
+    cv::Mat mSemanticJobImage;
+    long unsigned int mnSemanticJobFrameId;
+    bool mbSemanticFinishRequested;
+    bool mbSemanticHasJob;
 
     // Initalization (only for monocular)
     bool mbReadyToInitializate;

@@ -12,12 +12,18 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall   -O3")
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -march=native")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -march=native")
 
-# Check C++14 / C++11 / C++0x support
+# Check C++17 / C++14 / C++11 / C++0x support
 include(CheckCXXCompilerFlag)
+CHECK_CXX_COMPILER_FLAG("-std=c++17" COMPILER_SUPPORTS_CXX17)
 CHECK_CXX_COMPILER_FLAG("-std=c++14" COMPILER_SUPPORTS_CXX14)
 CHECK_CXX_COMPILER_FLAG("-std=c++11" COMPILER_SUPPORTS_CXX11)
 CHECK_CXX_COMPILER_FLAG("-std=c++0x" COMPILER_SUPPORTS_CXX0X)
-if(COMPILER_SUPPORTS_CXX14)
+if(COMPILER_SUPPORTS_CXX17)
+   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
+   # Keep legacy macro name used across the codebase.
+   add_definitions(-DCOMPILEDWITHC11)
+   message(STATUS "Using flag -std=c++17.")
+elseif(COMPILER_SUPPORTS_CXX14)
    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
    # Keep legacy macro name used across the codebase.
    add_definitions(-DCOMPILEDWITHC11)
@@ -49,9 +55,20 @@ find_package(Pangolin REQUIRED)
 find_package(realsense2)
 
 # ONNX Runtime
-set(ONNXRUNTIME_DIR "/home/hongkeijimu/libs/onnxruntime/onnxruntime-linux-x64-1.24.4")
+set(ONNXRUNTIME_DIR "$ENV{ONNXRUNTIME_ROOT}" CACHE PATH "Path to ONNX Runtime")
+if(NOT ONNXRUNTIME_DIR)
+    set(ONNXRUNTIME_DIR "$ENV{HOME}/libs/onnxruntime-gpu/onnxruntime-linux-x64-gpu-1.18.0" CACHE PATH "Path to ONNX Runtime" FORCE)
+endif()
+if(NOT EXISTS "${ONNXRUNTIME_DIR}/include/onnxruntime_cxx_api.h")
+    message(FATAL_ERROR "ONNX Runtime headers not found under ${ONNXRUNTIME_DIR}")
+endif()
+if(NOT EXISTS "${ONNXRUNTIME_DIR}/lib/libonnxruntime.so")
+    message(FATAL_ERROR "ONNX Runtime library not found under ${ONNXRUNTIME_DIR}/lib")
+endif()
 include_directories(${ONNXRUNTIME_DIR}/include)
 link_directories(${ONNXRUNTIME_DIR}/lib)
+set(CMAKE_BUILD_RPATH "${ONNXRUNTIME_DIR}/lib")
+set(CMAKE_INSTALL_RPATH "${ONNXRUNTIME_DIR}/lib")
 
 include_directories(
 ${PROJECT_SOURCE_DIR}
@@ -137,7 +154,7 @@ ${PROJECT_SOURCE_DIR}/Thirdparty/DBoW2/lib/libDBoW2.so
 ${PROJECT_SOURCE_DIR}/Thirdparty/g2o/lib/libg2o.so
 -lboost_serialization
 -lcrypto
-onnxruntime
+${ONNXRUNTIME_DIR}/lib/libonnxruntime.so
 )
 
 # If RealSense SDK is found the library is added and its examples compiled
