@@ -38,6 +38,7 @@
 #include <boost/serialization/vector.hpp>
 #include <boost/serialization/map.hpp>
 
+#include "DenseFeatureTensor.h"
 
 namespace ORB_SLAM3
 {
@@ -535,6 +536,13 @@ public:
         }
         cout << "Point distribution in KeyFrame: left-> " << left << " --- right-> " << right << endl;
     }
+
+public:
+    cv::Mat mImGray;
+    std::vector<float> mvUncertainty;
+    std::vector<float> mvDynWeight;
+    bool mbDenseFeatureReady = false;
+    DenseFeatureTensor mDenseFeat;
 
 
 };

@@ -42,6 +42,8 @@
 #include <mutex>
 #include <unordered_set>
 
+#include "UncertaintyEstimator.h"
+
 namespace ORB_SLAM3
 {
 
@@ -252,6 +254,14 @@ protected:
     // In that case we are doing visual odometry. The system will try to do relocalization to recover
     // "zero-drift" localization to the map.
     bool mbVO;
+
+    UncertaintyEstimator* mpUncertaintyEstimator;
+
+    bool mbUseUncertaintyWeighting;
+
+    bool mbUseUncertaintyHardReject;
+    float mfUncertaintyHardRejectTh;
+
 
     //Other Thread Pointers
     LocalMapping* mpLocalMapper;

@@ -39,6 +39,8 @@
 #include "Eigen/Core"
 #include "sophus/se3.hpp"
 
+#include "DenseFeatureTensor.h"
+
 namespace ORB_SLAM3
 {
 #define FRAME_GRID_ROWS 48
@@ -352,6 +354,7 @@ public:
 
     Eigen::Vector3f UnprojectStereoFishEye(const int &i);
 
+    cv::Mat mImGray;
     cv::Mat imgLeft, imgRight;
 
     void PrintPointDistribution(){
@@ -367,6 +370,14 @@ public:
     }
 
     Sophus::SE3<double> T_test;
+
+// 每一帧的每个关键点要计算uncertainty
+public:
+    std::vector<float> mvUncertainty;
+    std::vector<float> mvDynWeight;
+    bool mbUncertaintyReady = false;
+    bool mbDenseFeatureReady = false;
+    DenseFeatureTensor mDenseFeat;
 };
 
 }// namespace ORB_SLAM

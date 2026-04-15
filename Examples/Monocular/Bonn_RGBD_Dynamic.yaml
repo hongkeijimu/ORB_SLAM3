@@ -1,0 +1,59 @@
+%YAML:1.0
+
+#--------------------------------------------------------------------------------------------
+# Camera Parameters
+#--------------------------------------------------------------------------------------------
+File.version: "1.0"
+
+Camera.type: "PinHole"
+
+# Bonn RGB-D Dynamic Dataset official RGB calibration
+Camera1.fx: 542.822841
+Camera1.fy: 542.576870
+Camera1.cx: 315.593520
+Camera1.cy: 237.756098
+
+Camera1.k1: 0.039903
+Camera1.k2: -0.099343
+Camera1.p1: -0.000730
+Camera1.p2: -0.000144
+Camera1.k3: 0.000000
+
+Camera.width: 640
+Camera.height: 480
+
+# Sequence runs at about 29.84 Hz; 30 matches the dataset specification
+Camera.fps: 30
+
+# RGB PNG images
+Camera.RGB: 1
+
+# ORB-SLAM3 RGB-D example parameters. Stereo.b is only used to derive close/far depth threshold.
+Stereo.ThDepth: 40.0
+Stereo.b: 0.07732
+
+# Depth PNG values: 5000 == 1 meter
+RGBD.DepthMapFactor: 5000.0
+
+#--------------------------------------------------------------------------------------------
+# ORB Parameters
+#--------------------------------------------------------------------------------------------
+ORBextractor.nFeatures: 1000
+ORBextractor.scaleFactor: 1.2
+ORBextractor.nLevels: 8
+ORBextractor.iniThFAST: 20
+ORBextractor.minThFAST: 7
+
+#--------------------------------------------------------------------------------------------
+# Viewer Parameters
+#--------------------------------------------------------------------------------------------
+Viewer.KeyFrameSize: 0.05
+Viewer.KeyFrameLineWidth: 1.0
+Viewer.GraphLineWidth: 0.9
+Viewer.PointSize: 2.0
+Viewer.CameraSize: 0.08
+Viewer.CameraLineWidth: 3.0
+Viewer.ViewpointX: 0.0
+Viewer.ViewpointY: -0.7
+Viewer.ViewpointZ: -1.8
+Viewer.ViewpointF: 500.0

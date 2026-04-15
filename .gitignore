@@ -21,6 +21,8 @@ Examples/Monocular/mono_kitti
 Examples/Monocular/mono_tum
 Examples/Monocular/mono_tum_vi
 Examples/Monocular/mono_realsense_t265
+Examples/Monocular/mono_Bonn_RGBD_Dynamic
+
 
 Examples/Stereo/stereo_euroc
 Examples/Stereo/stereo_kitti
@@ -72,6 +74,7 @@ lib/
 cmake_modules/
 cmake-build-debug/
 
+.codex
 ExecMean.txt
 SessionInfo.txt
 Results_Euroc.txt

@@ -18,7 +18,7 @@
 
 
 #include "Optimizer.h"
-
+#include "Frame.h"
 
 #include <complex>
 
@@ -877,7 +877,15 @@ int Optimizer::PoseOptimization(Frame *pFrame)
                     e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(0)));
                     e->setMeasurement(obs);
                     const float invSigma2 = pFrame->mvInvLevelSigma2[kpUn.octave];
-                    e->setInformation(Eigen::Matrix2d::Identity()*invSigma2);
+
+                    float dynWeight = 1.0f;
+                    if (i < pFrame->mvDynWeight.size()) {
+                        dynWeight = pFrame->mvDynWeight[i];
+                    }
+
+                    dynWeight = std::max(0.1f, std::min(5.0f, dynWeight));
+
+                    e->setInformation(Eigen::Matrix2d::Identity()*invSigma2*dynWeight);
 
                     g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
                     e->setRobustKernel(rk);
@@ -906,7 +914,14 @@ int Optimizer::PoseOptimization(Frame *pFrame)
                     e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(0)));
                     e->setMeasurement(obs);
                     const float invSigma2 = pFrame->mvInvLevelSigma2[kpUn.octave];
-                    Eigen::Matrix3d Info = Eigen::Matrix3d::Identity()*invSigma2;
+
+                    float dynWeight = 1.0f;
+                    if (i < pFrame->mvDynWeight.size()) 
+                        dynWeight = pFrame->mvDynWeight[i];
+                    
+                    dynWeight = std::max(0.1f, std::min(5.0f, dynWeight));
+
+                    Eigen::Matrix3d Info = Eigen::Matrix3d::Identity()*invSigma2*dynWeight;
                     e->setInformation(Info);
 
                     g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
@@ -945,7 +960,12 @@ int Optimizer::PoseOptimization(Frame *pFrame)
                     e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex *>(optimizer.vertex(0)));
                     e->setMeasurement(obs);
                     const float invSigma2 = pFrame->mvInvLevelSigma2[kpUn.octave];
-                    e->setInformation(Eigen::Matrix2d::Identity() * invSigma2);
+                    float dynWeight = 1.0f;
+                    if (i < pFrame->mvDynWeight.size()) 
+                        dynWeight = pFrame->mvDynWeight[i];
+                    
+                    dynWeight = std::max(0.1f, std::min(5.0f, dynWeight));
+                    e->setInformation(Eigen::Matrix2d::Identity()*invSigma2*dynWeight);
 
                     g2o::RobustKernelHuber *rk = new g2o::RobustKernelHuber;
                     e->setRobustKernel(rk);

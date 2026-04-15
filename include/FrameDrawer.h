@@ -54,6 +54,9 @@ public:
 
 protected:
 
+    bool mbDrawUncertainty;
+    float mfUncertaintyAlpha;
+
     void DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText);
 
     // Info of the frame to be drawn

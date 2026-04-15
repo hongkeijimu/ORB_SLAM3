@@ -46,8 +46,11 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
     mbOnlyTracking(false), mbMapUpdated(false), mbVO(false), mpORBVocabulary(pVoc), mpKeyFrameDB(pKFDB),
     mbReadyToInitializate(false), mpSystem(pSys), mpViewer(NULL), bStepByStep(false),
     mpFrameDrawer(pFrameDrawer), mpMapDrawer(pMapDrawer), mpAtlas(pAtlas), mnLastRelocFrameId(0), time_recently_lost(5.0),
-    mnInitialFrameId(0), mbCreatedMap(false), mnFirstFrameId(0), mpCamera2(nullptr), mpLastKeyFrame(static_cast<KeyFrame*>(NULL))
+    mnInitialFrameId(0), mbCreatedMap(false), mnFirstFrameId(0), mpCamera2(nullptr), mpLastKeyFrame(static_cast<KeyFrame*>(NULL)),
+    mpUncertaintyEstimator(nullptr), mbUseUncertaintyWeighting(true), mbUseUncertaintyHardReject(false), mfUncertaintyHardRejectTh(0.6f)
 {
+    mpUncertaintyEstimator = new UncertaintyEstimator();
+
     // Load camera parameters from settings file
     if(settings){
         newParameterLoader(settings);
@@ -529,6 +532,10 @@ void Tracking::PrintTimeStats()
 Tracking::~Tracking()
 {
     //f_track_stats.close();
+    if (mpUncertaintyEstimator) {
+        delete mpUncertaintyEstimator;
+        mpUncertaintyEstimator = nullptr;
+    }
 
 }
 
@@ -2740,6 +2747,16 @@ bool Tracking::TrackReferenceKeyFrame()
 
     //mCurrentFrame.PrintPointDistribution();
 
+    // 不确定估计
+    if (mbUseUncertaintyWeighting && mpUncertaintyEstimator && mpReferenceKF) {
+        mpUncertaintyEstimator->ExtractDenseFeature(mCurrentFrame);
+
+        if (!mpReferenceKF->mbDenseFeatureReady) {
+            mpUncertaintyEstimator->ExtractDenseFeature(mpReferenceKF);
+        }
+
+        mpUncertaintyEstimator->ComputeFrameUncertainty(mCurrentFrame, mpReferenceKF);
+    }
 
     // cout << " TrackReferenceKeyFrame mLastFrame.mTcw:  " << mLastFrame.mTcw << endl;
     Optimizer::PoseOptimization(&mCurrentFrame);
@@ -2903,6 +2920,19 @@ bool Tracking::TrackWithMotionModel()
             return true;
         else
             return false;
+    }
+
+    KeyFrame* pRefKF = mCurrentFrame.mpReferenceKF ? mCurrentFrame.mpReferenceKF : mpReferenceKF;
+
+    if (mbUseUncertaintyWeighting && mpUncertaintyEstimator && pRefKF) {
+        mpUncertaintyEstimator->ExtractDenseFeature(mCurrentFrame);
+        
+
+        if (!pRefKF->mbDenseFeatureReady) {
+            mpUncertaintyEstimator->ExtractDenseFeature(pRefKF);
+        }
+
+        mpUncertaintyEstimator->ComputeFrameUncertainty(mCurrentFrame, pRefKF);
     }
 
     // Optimize frame pose with all matches
@@ -3222,6 +3252,15 @@ void Tracking::CreateNewKeyFrame()
         return;
 
     KeyFrame* pKF = new KeyFrame(mCurrentFrame,mpAtlas->GetCurrentMap(),mpKeyFrameDB);
+
+    if (mbUseUncertaintyWeighting && mpUncertaintyEstimator) {
+        if (!pKF->mbDenseFeatureReady) {
+            mpUncertaintyEstimator->ExtractDenseFeature(pKF);
+        }
+
+        pKF->mvUncertainty = mCurrentFrame.mvUncertainty;
+        pKF->mvDynWeight = mCurrentFrame.mvDynWeight;
+    }
 
     if(mpAtlas->isImuInitialized()) //  || mpLocalMapper->IsInitializing())
         pKF->bImu = true;
