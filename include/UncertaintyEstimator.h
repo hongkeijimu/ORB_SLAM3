@@ -4,6 +4,7 @@
 #include "Frame.h"
 #include "KeyFrame.h"
 #include <vector>
+#include "DenseFeatureExtractor.h"
 
 namespace ORB_SLAM3
 {
@@ -11,6 +12,7 @@ namespace ORB_SLAM3
     {
     public:
         UncertaintyEstimator();
+        ~UncertaintyEstimator();
 
         void ExtractDenseFeature(Frame &frame);
         void ExtractDenseFeature(KeyFrame *pKF);
@@ -35,6 +37,7 @@ namespace ORB_SLAM3
         float mMinDynWeight;
         float mMaxDynWeight;
         float mDefaultUncertainty;
+        DenseFeatureExtractor* mpDenseFeatureExtractor;
 
     private:
         bool ProjectMapPointToFrame(MapPoint* pMP, KeyFrame* pKF, float &u, float &v) const;

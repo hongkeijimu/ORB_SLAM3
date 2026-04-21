@@ -50,11 +50,15 @@ public:
     cv::Mat DrawFrame(float imageScale=1.f);
     cv::Mat DrawRightFrame(float imageScale=1.f);
 
+    void SetDrawUncertainty(bool bDraw);
+    void SetDrawUncertaintyText(bool bDrawText);
+
     bool both;
 
 protected:
 
     bool mbDrawUncertainty;
+    bool mbDrawUncertaintyText;
     float mfUncertaintyAlpha;
 
     void DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText);

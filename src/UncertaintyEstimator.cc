@@ -12,6 +12,39 @@ namespace ORB_SLAM3
 {
     namespace
     {
+        bool GetDenseFeatureKeyPoint(const Frame &frame, int idx, cv::Point2f &pt)
+        {
+            if (idx < 0)
+                return false;
+
+            // Dense features are currently extracted from the left/raw image.
+            if (frame.Nleft == -1)
+            {
+                if (idx >= static_cast<int>(frame.mvKeys.size()))
+                    return false;
+
+                pt = frame.mvKeys[idx].pt;
+                return true;
+            }
+
+            if (idx >= frame.Nleft || idx >= static_cast<int>(frame.mvKeys.size()))
+                return false;
+
+            pt = frame.mvKeys[idx].pt;
+            return true;
+        }
+
+        float ComputeDenseFeatureScale(int featSize, int imgSize)
+        {
+            if (featSize <= 0 || imgSize <= 0)
+                return 1.0f;
+
+            if (featSize == 1 || imgSize == 1)
+                return 0.0f;
+
+            return static_cast<float>(featSize - 1) / static_cast<float>(imgSize - 1);
+        }
+
         bool BuildDenseFeatureTensor(const cv::Mat &image, DenseFeatureTensor &feat)
         {
             if (image.empty())
@@ -82,7 +115,15 @@ namespace ORB_SLAM3
 
         mMinDynWeight = 0.2f;
         mMaxDynWeight = 3.0f;
-        mDefaultUncertainty = 0.5f;
+        mDefaultUncertainty = 0.1f;
+        mpDenseFeatureExtractor = new DenseFeatureExtractor("./dinov2_vits14_dense_224.onnx", 224, 224, true);
+    }
+    UncertaintyEstimator::~UncertaintyEstimator() 
+    {
+        if (mpDenseFeatureExtractor){
+            delete mpDenseFeatureExtractor;
+            mpDenseFeatureExtractor = nullptr;
+        }
     }
 
     bool UncertaintyEstimator::BilinearSampleFeature(const DenseFeatureTensor &feat, float x, float y, std::vector<float> &outFeat) const
@@ -128,12 +169,22 @@ namespace ORB_SLAM3
             return;
 
         const cv::Mat &img = frame.mImGray.empty() ? frame.imgLeft : frame.mImGray;
-        if (!BuildDenseFeatureTensor(img, frame.mDenseFeat))
-        {
-            std::cerr << "[UncertaintyEstimator] Empty frame image." << std::endl;
+
+        if (img.empty()) {
+            std::cerr << "[UnceratintyEstimator] Empty frame image. " << std::endl;
+        }
+
+        if (!mpDenseFeatureExtractor) {
+            std::cerr << "[UncertaintyEstimator] DenseFeatureExtractor is null ." << std::endl;
+        }
+
+        if (!mpDenseFeatureExtractor->Extract(img, frame.mDenseFeat)) {
+            std::cerr << "[UncertaintyEstimator] Dense feature exrtact failed. " << std::endl;
             return;
         }
 
+        frame.mfFeatScaleX = ComputeDenseFeatureScale(frame.mDenseFeat.W, img.cols);
+        frame.mfFeatScaleY = ComputeDenseFeatureScale(frame.mDenseFeat.H, img.rows);
         frame.mbDenseFeatureReady = true;
     }
 
@@ -142,11 +193,22 @@ namespace ORB_SLAM3
         if (!pKF || pKF->mbDenseFeatureReady)
             return;
 
-        if (!BuildDenseFeatureTensor(pKF->mImGray, pKF->mDenseFeat))
-        {
-            std::cerr << "[UncertaintyEstimator] Empty KeyFrame image." << std::endl;
+        const cv::Mat &img = pKF->mImGray;
+
+        if (img.empty()) {
+            std::cerr << "[UnceratintyEstimator] Empty frame image. " << std::endl;
+        }
+
+        if (!mpDenseFeatureExtractor) {
+            std::cerr << "[UncertaintyEstimator] DenseFeatureExtractor is null ." << std::endl;
+        }
+
+        if (!mpDenseFeatureExtractor->Extract(img, pKF->mDenseFeat)) {
+            std::cerr << "[UncertaintyEstimator] Dense feature exrtact failed. " << std::endl;
             return;
         }
+        pKF->mfFeatScaleX = ComputeDenseFeatureScale(pKF->mDenseFeat.W, img.cols);
+        pKF->mfFeatScaleY = ComputeDenseFeatureScale(pKF->mDenseFeat.H, img.rows);
 
         pKF->mbDenseFeatureReady = true;
     }
@@ -181,12 +243,14 @@ namespace ORB_SLAM3
             if (!pMP || pMP->isBad())
                 continue;
 
-            const cv::KeyPoint &kp = currentFrame.mvKeysUn[i];
-            float uCur = kp.pt.x;
-            float vCur = kp.pt.y;
+            cv::Point2f ptCur;
+            if (!GetDenseFeatureKeyPoint(currentFrame, i, ptCur))
+                continue;
 
-            // 当前帧采样特征
-            if (!BilinearSampleFeature(currentFrame.mDenseFeat, uCur, vCur, featCur))
+            // 当前帧某一个关键点采样特征
+            float xCurFeat = ptCur.x * currentFrame.mfFeatScaleX;
+            float yCurFeat = ptCur.y * currentFrame.mfFeatScaleY;
+            if (!BilinearSampleFeature(currentFrame.mDenseFeat, xCurFeat, yCurFeat, featCur))
                 continue;
 
             // 地图点投影到参考关键帧
@@ -194,8 +258,10 @@ namespace ORB_SLAM3
             if (!ProjectMapPointToFrame(pMP, pRefKF, uRef, vRef))
                 continue;
 
-            // 参考帧采样特征
-            if (!BilinearSampleFeature(pRefKF->mDenseFeat, uRef, vRef, featRef))
+            // 参考帧该关键点采样特征
+            float xRefFeat = uRef * pRefKF->mfFeatScaleX;
+            float yRefFeat = vRef * pRefKF->mfFeatScaleY;
+            if (!BilinearSampleFeature(pRefKF->mDenseFeat, xRefFeat, yRefFeat, featRef))
                 continue;
 
             float sim = CosineSimilarity(featCur, featRef);
@@ -245,6 +311,10 @@ namespace ORB_SLAM3
         if (!pMP || !pKF || pMP->isBad())
             return false;
 
+        const cv::Mat &img = pKF->mImGray;
+        if (img.empty() || !pKF->mpCamera)
+            return false;
+
         Eigen::Vector3f Xw = pMP->GetWorldPos();
         Sophus::SE3f Tcw = pKF->GetPose();
         Eigen::Vector3f Xc = Tcw * Xw;
@@ -252,15 +322,34 @@ namespace ORB_SLAM3
         if (Xc[2] <= 0.0f)
             return false;
 
-        const float fx = pKF->fx;
-        const float fy = pKF->fy;
-        const float cx = pKF->cx;
-        const float cy = pKF->cy;
+        const Eigen::Vector2f uv = pKF->mpCamera->project(Xc);
+        u = uv(0);
+        v = uv(1);
 
-        u = fx * Xc[0] / Xc[2] + cx;
-        v = fy * Xc[1] / Xc[2] + cy;
+        if (pKF->mpCamera->GetType() == GeometricCamera::CAM_PINHOLE && pKF->mDistCoef.total() >= 4)
+        {
+            const float x = (u - pKF->cx) * pKF->invfx;
+            const float y = (v - pKF->cy) * pKF->invfy;
+            const float r2 = x * x + y * y;
 
-        if (u < pKF->mnMinX || u > pKF->mnMaxX || v < pKF->mnMinY || v > pKF->mnMaxY)
+            const float k1 = pKF->mDistCoef.at<float>(0);
+            const float k2 = pKF->mDistCoef.at<float>(1);
+            const float p1 = pKF->mDistCoef.at<float>(2);
+            const float p2 = pKF->mDistCoef.at<float>(3);
+            const float k3 = (pKF->mDistCoef.total() >= 5) ? pKF->mDistCoef.at<float>(4) : 0.0f;
+
+            float xDistort = x * (1.0f + k1 * r2 + k2 * r2 * r2 + k3 * r2 * r2 * r2);
+            float yDistort = y * (1.0f + k1 * r2 + k2 * r2 * r2 + k3 * r2 * r2 * r2);
+
+            xDistort += 2.0f * p1 * x * y + p2 * (r2 + 2.0f * x * x);
+            yDistort += p1 * (r2 + 2.0f * y * y) + 2.0f * p2 * x * y;
+
+            u = xDistort * pKF->fx + pKF->cx;
+            v = yDistort * pKF->fy + pKF->cy;
+        }
+
+        if (u < 0.0f || u > static_cast<float>(img.cols - 1) ||
+            v < 0.0f || v > static_cast<float>(img.rows - 1))
             return false;
 
         return true;
@@ -299,13 +388,17 @@ namespace ORB_SLAM3
         else
             cv::cvtColor(img, vis, cv::COLOR_BGRA2BGR);
 
-        for (size_t i = 0; i < frame.mvKeysUn.size(); ++i) {
+        const size_t nVis = std::min(frame.mvUncertainty.size(),
+                                     (frame.Nleft == -1) ? frame.mvKeys.size()
+                                                         : static_cast<size_t>(frame.Nleft));
+
+        for (size_t i = 0; i < nVis; ++i) {
             float u = (i < frame.mvUncertainty.size() ? frame.mvUncertainty[i] : mDefaultUncertainty);
             u = std::max(0.0f, std::min(1.0f, u));
 
             cv::Scalar color(255.0f * (1.0f - u), 0.0f, 255.0f * u);
 
-            cv::circle(vis, frame.mvKeysUn[i].pt, 2, color, -1);
+            cv::circle(vis, frame.mvKeys[i].pt, 2, color, -1);
         }
         return vis;
     }

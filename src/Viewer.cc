@@ -164,6 +164,12 @@ void Viewer::Run()
     mbFinished = false;
     mbStopped = false;
 
+    cv::startWindowThread();
+    cv::namedWindow("ORB-SLAM3: Current Frame", cv::WINDOW_NORMAL);
+    cv::resizeWindow("ORB-SLAM3: Current Frame", static_cast<int>(mImageWidth), static_cast<int>(mImageHeight));
+    cv::moveWindow("ORB-SLAM3: Current Frame", 40, 40);
+    cv::waitKey(1);
+
     pangolin::CreateWindowAndBind("ORB-SLAM3: Map Viewer",1024,768);
 
     // 3D Mouse handler requires depth testing to be enabled
@@ -182,6 +188,8 @@ void Viewer::Run()
     pangolin::Var<bool> menuShowKeyFrames("menu.Show KeyFrames",true,true);
     pangolin::Var<bool> menuShowGraph("menu.Show Graph",false,true);
     pangolin::Var<bool> menuShowInertialGraph("menu.Show Inertial Graph",true,true);
+    pangolin::Var<bool> menuShowUncertainty("menu.Show Uncertainty",true,true);
+    pangolin::Var<bool> menuShowUncertaintyText("menu.Show U/W Text",false,false);
     pangolin::Var<bool> menuLocalizationMode("menu.Localization Mode",false,true);
     pangolin::Var<bool> menuReset("menu.Reset",false,false);
     pangolin::Var<bool> menuStop("menu.Stop",false,false);
@@ -204,7 +212,6 @@ void Viewer::Run()
     Twc.SetIdentity();
     pangolin::OpenGlMatrix Ow; // Oriented with g in the z axis
     Ow.SetIdentity();
-    cv::namedWindow("ORB-SLAM3: Current Frame");
 
     bool bFollow = true;
     bool bLocalizationMode = false;
@@ -317,6 +324,9 @@ void Viewer::Run()
 
         pangolin::FinishFrame();
 
+        mpFrameDrawer->SetDrawUncertainty(menuShowUncertainty);
+        mpFrameDrawer->SetDrawUncertaintyText(menuShowUncertainty && menuShowUncertaintyText);
+
         cv::Mat toShow;
         cv::Mat im = mpFrameDrawer->DrawFrame(trackedImageScale);
 
@@ -344,6 +354,8 @@ void Viewer::Run()
             menuShowInertialGraph = true;
             menuShowKeyFrames = true;
             menuShowPoints = true;
+            menuShowUncertainty = true;
+            menuShowUncertaintyText = true;
             menuLocalizationMode = false;
             if(bLocalizationMode)
                 mpSystem->DeactivateLocalizationMode();

@@ -48,6 +48,22 @@ find_package(Eigen3 3.1.0 REQUIRED)
 find_package(Pangolin REQUIRED)
 find_package(realsense2)
 
+# ONNX Runtime
+set(ONNXRUNTIME_DIR "$ENV{ONNXRUNTIME_ROOT}" CACHE PATH "Path to ONNX Runtime")
+if(NOT ONNXRUNTIME_DIR)
+    set(ONNXRUNTIME_DIR "$ENV{HOME}/libs/onnxruntime-gpu/onnxruntime-linux-x64-gpu-1.18.0" CACHE PATH "Path to ONNX Runtime" FORCE)
+endif()
+if(NOT EXISTS "${ONNXRUNTIME_DIR}/include/onnxruntime_cxx_api.h")
+    message(FATAL_ERROR "ONNX Runtime headers not found under ${ONNXRUNTIME_DIR}")
+endif()
+if(NOT EXISTS "${ONNXRUNTIME_DIR}/lib/libonnxruntime.so")
+    message(FATAL_ERROR "ONNX Runtime library not found under ${ONNXRUNTIME_DIR}/lib")
+endif()
+include_directories(${ONNXRUNTIME_DIR}/include)
+link_directories(${ONNXRUNTIME_DIR}/lib)
+set(CMAKE_BUILD_RPATH "${ONNXRUNTIME_DIR}/lib")
+set(CMAKE_INSTALL_RPATH "${ONNXRUNTIME_DIR}/lib")
+
 include_directories(
 ${PROJECT_SOURCE_DIR}
 ${PROJECT_SOURCE_DIR}/include
@@ -89,6 +105,7 @@ src/TwoViewReconstruction.cc
 src/Config.cc
 src/Settings.cc
 src/UncertaintyEstimator.cc
+src/DenseFeatureExtractor.cc
 include/System.h
 include/Tracking.h
 include/LocalMapping.h
@@ -119,7 +136,9 @@ include/TwoViewReconstruction.h
 include/SerializationUtils.h
 include/Config.h
 include/Settings.h
-include/UncertaintyEstimator.h)
+include/UncertaintyEstimator.h
+include/DenseFeatureExtractor.h
+include/DenseFeatureTensor.h)
 
 add_subdirectory(Thirdparty/g2o)
 
@@ -131,6 +150,7 @@ ${PROJECT_SOURCE_DIR}/Thirdparty/DBoW2/lib/libDBoW2.so
 ${PROJECT_SOURCE_DIR}/Thirdparty/g2o/lib/libg2o.so
 -lboost_serialization
 -lcrypto
+${ONNXRUNTIME_DIR}/lib/libonnxruntime.so
 )
 
 # If RealSense SDK is found the library is added and its examples compiled

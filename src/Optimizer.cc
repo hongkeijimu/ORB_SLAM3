@@ -44,6 +44,27 @@
 
 namespace ORB_SLAM3
 {
+
+    namespace 
+    {
+        inline float GetKeyFrameDynWeight(const ORB_SLAM3::KeyFrame* pKF, int idx) {
+            if (!pKF)
+                return 1.0f;
+
+            if (idx < 0 || idx >= static_cast<int>(pKF->mvDynWeight.size()))
+                return 1.0f;
+
+            float w = pKF->mvDynWeight[idx];
+
+            if (std::isnan(w) || std::isinf(w))
+                return 1.0f;
+
+            w = std::max(0.1f, std::min(w, 5.0f));
+
+            return w;
+        }
+    }
+
 bool sortByVal(const pair<MapPoint*, int> &a, const pair<MapPoint*, int> &b)
 {
     return (a.second < b.second);
@@ -1333,8 +1354,10 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
                     e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(id)));
                     e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(pKFi->mnId)));
                     e->setMeasurement(obs);
+
                     const float &invSigma2 = pKFi->mvInvLevelSigma2[kpUn.octave];
-                    e->setInformation(Eigen::Matrix2d::Identity()*invSigma2);
+                    float dynWeight = GetKeyFrameDynWeight(pKFi, leftIndex);
+                    e->setInformation(Eigen::Matrix2d::Identity()*invSigma2 * dynWeight);
 
                     g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
                     e->setRobustKernel(rk);
@@ -1362,7 +1385,8 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
                     e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(pKFi->mnId)));
                     e->setMeasurement(obs);
                     const float &invSigma2 = pKFi->mvInvLevelSigma2[kpUn.octave];
-                    Eigen::Matrix3d Info = Eigen::Matrix3d::Identity()*invSigma2;
+                    float dynWeight = GetKeyFrameDynWeight(pKFi, leftIndex);
+                    Eigen::Matrix3d Info = Eigen::Matrix3d::Identity()*invSigma2*dynWeight;
                     e->setInformation(Info);
 
                     g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
@@ -1384,10 +1408,10 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
                 }
 
                 if(pKFi->mpCamera2){
-                    int rightIndex = get<1>(mit->second);
+                    const int fullRightIndex = get<1>(mit->second);
 
-                    if(rightIndex != -1 ){
-                        rightIndex -= pKFi->NLeft;
+                    if(fullRightIndex != -1 ){
+                        int rightIndex = fullRightIndex - pKFi->NLeft;
 
                         Eigen::Matrix<double,2,1> obs;
                         cv::KeyPoint kp = pKFi->mvKeysRight[rightIndex];
@@ -1399,7 +1423,8 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
                         e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(pKFi->mnId)));
                         e->setMeasurement(obs);
                         const float &invSigma2 = pKFi->mvInvLevelSigma2[kp.octave];
-                        e->setInformation(Eigen::Matrix2d::Identity()*invSigma2);
+                        float dynWeight = GetKeyFrameDynWeight(pKFi, fullRightIndex);
+                        e->setInformation(Eigen::Matrix2d::Identity()*invSigma2*dynWeight);
 
                         g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
                         e->setRobustKernel(rk);

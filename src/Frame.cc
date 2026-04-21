@@ -73,7 +73,8 @@ Frame::Frame(const Frame &frame)
      mTcw(frame.mTcw), mbHasPose(false), mbHasVelocity(false), mImGray(frame.mImGray.clone()),
      imgLeft(frame.imgLeft.clone()), imgRight(frame.imgRight.clone()), mvUncertainty(frame.mvUncertainty),
      mvDynWeight(frame.mvDynWeight), mbUncertaintyReady(frame.mbUncertaintyReady),
-     mbDenseFeatureReady(frame.mbDenseFeatureReady), mDenseFeat(frame.mDenseFeat)
+     mbDenseFeatureReady(frame.mbDenseFeatureReady), mDenseFeat(frame.mDenseFeat),
+     mfFeatScaleX(frame.mfFeatScaleX), mfFeatScaleY(frame.mfFeatScaleY)
 {
     for(int i=0;i<FRAME_GRID_COLS;i++)
         for(int j=0; j<FRAME_GRID_ROWS; j++){

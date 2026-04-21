@@ -378,6 +378,10 @@ public:
     bool mbUncertaintyReady = false;
     bool mbDenseFeatureReady = false;
     DenseFeatureTensor mDenseFeat;
+
+    
+    float mfFeatScaleX = 1.0f;
+    float mfFeatScaleY = 1.0f;
 };
 
 }// namespace ORB_SLAM
