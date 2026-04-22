@@ -34,6 +34,27 @@ namespace ORB_SLAM3
             return true;
         }
 
+        bool GetDenseFeatureKeyPoint(const KeyFrame &keyFrame, int idx, cv::Point2f &pt)
+        {
+            if (idx < 0)
+                return false;
+
+            if (keyFrame.NLeft == -1)
+            {
+                if (idx >= static_cast<int>(keyFrame.mvKeys.size()))
+                    return false;
+
+                pt = keyFrame.mvKeys[idx].pt;
+                return true;
+            }
+
+            if (idx >= keyFrame.NLeft || idx >= static_cast<int>(keyFrame.mvKeys.size()))
+                return false;
+
+            pt = keyFrame.mvKeys[idx].pt;
+            return true;
+        }
+
         float ComputeDenseFeatureScale(int featSize, int imgSize)
         {
             if (featSize <= 0 || imgSize <= 0)
@@ -117,10 +138,17 @@ namespace ORB_SLAM3
         mMaxDynWeight = 3.0f;
         mDefaultUncertainty = 0.1f;
         mpDenseFeatureExtractor = new DenseFeatureExtractor("./dinov2_vits14_dense_224.onnx", 224, 224, true);
+
+        mGammaPrior = 0.5f;
+        mJointLR = 0.05f;
+        mJointIters = 0;
+        mMinUncertainty = 0.05f;
+        mMaxUncertainty = 1.0f;
     }
-    UncertaintyEstimator::~UncertaintyEstimator() 
+    UncertaintyEstimator::~UncertaintyEstimator()
     {
-        if (mpDenseFeatureExtractor){
+        if (mpDenseFeatureExtractor)
+        {
             delete mpDenseFeatureExtractor;
             mpDenseFeatureExtractor = nullptr;
         }
@@ -170,15 +198,18 @@ namespace ORB_SLAM3
 
         const cv::Mat &img = frame.mImGray.empty() ? frame.imgLeft : frame.mImGray;
 
-        if (img.empty()) {
+        if (img.empty())
+        {
             std::cerr << "[UnceratintyEstimator] Empty frame image. " << std::endl;
         }
 
-        if (!mpDenseFeatureExtractor) {
+        if (!mpDenseFeatureExtractor)
+        {
             std::cerr << "[UncertaintyEstimator] DenseFeatureExtractor is null ." << std::endl;
         }
 
-        if (!mpDenseFeatureExtractor->Extract(img, frame.mDenseFeat)) {
+        if (!mpDenseFeatureExtractor->Extract(img, frame.mDenseFeat))
+        {
             std::cerr << "[UncertaintyEstimator] Dense feature exrtact failed. " << std::endl;
             return;
         }
@@ -195,15 +226,18 @@ namespace ORB_SLAM3
 
         const cv::Mat &img = pKF->mImGray;
 
-        if (img.empty()) {
+        if (img.empty())
+        {
             std::cerr << "[UnceratintyEstimator] Empty frame image. " << std::endl;
         }
 
-        if (!mpDenseFeatureExtractor) {
+        if (!mpDenseFeatureExtractor)
+        {
             std::cerr << "[UncertaintyEstimator] DenseFeatureExtractor is null ." << std::endl;
         }
 
-        if (!mpDenseFeatureExtractor->Extract(img, pKF->mDenseFeat)) {
+        if (!mpDenseFeatureExtractor->Extract(img, pKF->mDenseFeat))
+        {
             std::cerr << "[UncertaintyEstimator] Dense feature exrtact failed. " << std::endl;
             return;
         }
@@ -213,68 +247,206 @@ namespace ORB_SLAM3
         pKF->mbDenseFeatureReady = true;
     }
 
-    void UncertaintyEstimator::ComputeFrameUncertainty(Frame &currentFrame, KeyFrame *pRefKF)
+    bool UncertaintyEstimator::BuildSparseUncertaintyMatches(
+        Frame &currentFrame,
+        KeyFrame *pRefKF,
+        std::vector<UncertaintyMatch> &matches)
     {
+        matches.clear();
+
         if (!pRefKF)
-            return;
+            return false;
 
         if (!currentFrame.mbDenseFeatureReady || currentFrame.mDenseFeat.empty())
-        {
-            std::cerr << "[UncertaintyEstimator] Current frame dense feature is not ready." << std::endl;
-            return;
-        }
+            return false;
 
         if (!pRefKF->mbDenseFeatureReady || pRefKF->mDenseFeat.empty())
-        {
-            std::cerr << "[UncertaintyEstimator] Reference keyframe dense feature is not ready." << std::endl;
-            return;
-        }
-
-        const int N = currentFrame.N;
-        currentFrame.mvUncertainty.assign(N, mDefaultUncertainty);
-        currentFrame.mvDynWeight.assign(N, UncertaintyToWeight(mDefaultUncertainty));
+            return false;
 
         std::vector<float> featCur, featRef;
 
+        const int N = currentFrame.N;
         for (int i = 0; i < N; ++i)
         {
             MapPoint *pMP = currentFrame.mvpMapPoints[i];
-
             if (!pMP || pMP->isBad())
                 continue;
 
+            const auto observations = pMP->GetObservations();
+            auto itObs = observations.find(pRefKF);
+            if (itObs == observations.end())
+                continue;
+
+            const int refIdx = std::get<0>(itObs->second); // 左目索引
+            if (refIdx < 0 || refIdx >= static_cast<int>(pRefKF->mvKeysUn.size()))
+                continue;
+
+            // 当前帧关键点位置 -> feature map 坐标
             cv::Point2f ptCur;
             if (!GetDenseFeatureKeyPoint(currentFrame, i, ptCur))
                 continue;
 
-            // 当前帧某一个关键点采样特征
             float xCurFeat = ptCur.x * currentFrame.mfFeatScaleX;
             float yCurFeat = ptCur.y * currentFrame.mfFeatScaleY;
+
             if (!BilinearSampleFeature(currentFrame.mDenseFeat, xCurFeat, yCurFeat, featCur))
                 continue;
 
-            // 地图点投影到参考关键帧
-            float uRef, vRef;
-            if (!ProjectMapPointToFrame(pMP, pRefKF, uRef, vRef))
+            // 参考关键帧关键点位置 -> feature map 坐标
+            cv::Point2f ptRef;
+            if (!GetDenseFeatureKeyPoint(*pRefKF, refIdx, ptRef))
                 continue;
 
-            // 参考帧该关键点采样特征
-            float xRefFeat = uRef * pRefKF->mfFeatScaleX;
-            float yRefFeat = vRef * pRefKF->mfFeatScaleY;
+            float xRefFeat = ptRef.x * pRefKF->mfFeatScaleX;
+            float yRefFeat = ptRef.y * pRefKF->mfFeatScaleY;
+
             if (!BilinearSampleFeature(pRefKF->mDenseFeat, xRefFeat, yRefFeat, featRef))
                 continue;
 
             float sim = CosineSimilarity(featCur, featRef);
             sim = std::max(-1.0f, std::min(1.0f, sim));
 
-            float u = 1.0f - sim;
+            float c = 1.0f - sim;
+            c = std::max(mMinUncertainty, std::min(mMaxUncertainty, c));
 
-            u = std::max(0.0f, std::min(1.0f, u));
-
-            currentFrame.mvUncertainty[i] = u;
-            currentFrame.mvDynWeight[i] = UncertaintyToWeight(u);
+            UncertaintyMatch m;
+            m.curIdx = i;
+            m.refIdx = refIdx;
+            m.cost = c;
+            matches.push_back(m);
         }
+
+        return !matches.empty();
+    }
+
+    void UncertaintyEstimator::OptimizeJointUncertainty(
+        Frame &currentFrame,
+        KeyFrame *pRefKF,
+        const std::vector<UncertaintyMatch> &matches)
+    {
+        if (!pRefKF || matches.empty())
+            return;
+
+        const int Ncur = currentFrame.N;
+        const int Nref = static_cast<int>(pRefKF->mvKeysUn.size());
+
+        std::vector<float> initCur(Ncur, mDefaultUncertainty);
+        std::vector<float> initRef(Nref, mDefaultUncertainty);
+        std::vector<float> sumCur(Ncur, 0.0f);
+        std::vector<float> sumRef(Nref, 0.0f);
+        std::vector<int> countCur(Ncur, 0);
+        std::vector<int> countRef(Nref, 0);
+
+        for (const auto &m : matches)
+        {
+            if (m.curIdx < 0 || m.curIdx >= Ncur || m.refIdx < 0 || m.refIdx >= Nref)
+                continue;
+
+            sumCur[m.curIdx] += m.cost;
+            sumRef[m.refIdx] += m.cost;
+            countCur[m.curIdx]++;
+            countRef[m.refIdx]++;
+        }
+
+        for (int i = 0; i < Ncur; ++i)
+        {
+            if (countCur[i] > 0)
+                initCur[i] = sumCur[i] / static_cast<float>(countCur[i]);
+
+            initCur[i] = std::max(mMinUncertainty, std::min(mMaxUncertainty, initCur[i]));
+        }
+
+        for (int j = 0; j < Nref; ++j)
+        {
+            if (countRef[j] > 0)
+                initRef[j] = sumRef[j] / static_cast<float>(countRef[j]);
+
+            initRef[j] = std::max(mMinUncertainty, std::min(mMaxUncertainty, initRef[j]));
+        }
+
+        currentFrame.mvUncertainty = initCur;
+        currentFrame.mvDynWeight.assign(Ncur, UncertaintyToWeight(mDefaultUncertainty));
+
+        pRefKF->mvUncertainty = initRef;
+        pRefKF->mvDynWeight.assign(Nref, UncertaintyToWeight(mDefaultUncertainty));
+
+        std::vector<float> gradCur(Ncur, 0.0f);
+        std::vector<float> gradRef(Nref, 0.0f);
+
+        for (int iter = 0; iter < mJointIters; ++iter)
+        {
+            std::fill(gradCur.begin(), gradCur.end(), 0.0f);
+            std::fill(gradRef.begin(), gradRef.end(), 0.0f);
+
+            // 1) 保持接近逐点初值
+            for (int i = 0; i < Ncur; ++i)
+                gradCur[i] += mGammaPrior * (currentFrame.mvUncertainty[i] - initCur[i]);
+
+            for (int j = 0; j < Nref; ++j)
+                gradRef[j] += mGammaPrior * (pRefKF->mvUncertainty[j] - initRef[j]);
+
+            // 2) 当前帧和参考关键帧之间做联合平滑
+            for (const auto &m : matches)
+            {
+                int i = m.curIdx;
+                int j = m.refIdx;
+                if (i < 0 || i >= Ncur || j < 0 || j >= Nref)
+                    continue;
+
+                const float diff = currentFrame.mvUncertainty[i] - pRefKF->mvUncertainty[j];
+                gradCur[i] += diff;
+                gradRef[j] -= diff;
+            }
+
+            // 3) 梯度下降更新
+            for (int i = 0; i < Ncur; ++i)
+            {
+                float u = currentFrame.mvUncertainty[i] - mJointLR * gradCur[i];
+                u = std::max(mMinUncertainty, std::min(mMaxUncertainty, u));
+                currentFrame.mvUncertainty[i] = u;
+            }
+
+            for (int j = 0; j < Nref; ++j)
+            {
+                float u = pRefKF->mvUncertainty[j] - mJointLR * gradRef[j];
+                u = std::max(mMinUncertainty, std::min(mMaxUncertainty, u));
+                pRefKF->mvUncertainty[j] = u;
+            }
+        }
+
+        // 更新 dynWeight
+        for (int i = 0; i < Ncur; ++i)
+            currentFrame.mvDynWeight[i] = UncertaintyToWeight(currentFrame.mvUncertainty[i]);
+
+        for (int j = 0; j < Nref; ++j)
+            pRefKF->mvDynWeight[j] = UncertaintyToWeight(pRefKF->mvUncertainty[j]);
+    }
+
+    void UncertaintyEstimator::ComputeJointFrameUncertainty(
+        Frame &currentFrame,
+        KeyFrame *pRefKF)
+    {
+        if (!pRefKF)
+            return;
+
+        std::vector<UncertaintyMatch> matches;
+        if (!BuildSparseUncertaintyMatches(currentFrame, pRefKF, matches))
+        {
+            currentFrame.mvUncertainty.assign(currentFrame.N, mDefaultUncertainty);
+            currentFrame.mvDynWeight.assign(currentFrame.N, UncertaintyToWeight(mDefaultUncertainty));
+            currentFrame.mbUncertaintyReady = true;
+            return;
+        }
+
+        OptimizeJointUncertainty(currentFrame, pRefKF, matches);
         currentFrame.mbUncertaintyReady = true;
+    }
+
+    void UncertaintyEstimator::ComputeFrameUncertainty(
+        Frame &currentFrame,
+        KeyFrame *pRefKF)
+    {
+        ComputeJointFrameUncertainty(currentFrame, pRefKF);
     }
 
     float UncertaintyEstimator::CosineSimilarity(const std::vector<float> &a, const std::vector<float> &b) const
@@ -374,7 +546,7 @@ namespace ORB_SLAM3
         std::cout << "[Uncertainty] min = " << minU << " max = " << maxU << " mean = " << (cnt > 0 ? sumU / cnt : 0.0f) << std::endl;
     }
 
-    cv::Mat UncertaintyEstimator::VistualizeFrameUncertainty(const Frame &frame) const 
+    cv::Mat UncertaintyEstimator::VistualizeFrameUncertainty(const Frame &frame) const
     {
         cv::Mat vis;
         const cv::Mat &img = frame.mImGray.empty() ? frame.imgLeft : frame.mImGray;
@@ -392,7 +564,8 @@ namespace ORB_SLAM3
                                      (frame.Nleft == -1) ? frame.mvKeys.size()
                                                          : static_cast<size_t>(frame.Nleft));
 
-        for (size_t i = 0; i < nVis; ++i) {
+        for (size_t i = 0; i < nVis; ++i)
+        {
             float u = (i < frame.mvUncertainty.size() ? frame.mvUncertainty[i] : mDefaultUncertainty);
             u = std::max(0.0f, std::min(1.0f, u));
 

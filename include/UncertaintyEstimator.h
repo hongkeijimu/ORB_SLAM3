@@ -37,10 +37,29 @@ namespace ORB_SLAM3
         float mMinDynWeight;
         float mMaxDynWeight;
         float mDefaultUncertainty;
-        DenseFeatureExtractor* mpDenseFeatureExtractor;
+        DenseFeatureExtractor *mpDenseFeatureExtractor;
+
+        float mGammaPrior;
+        float mJointLR;
+        int mJointIters;
+        float mMinUncertainty;
+        float mMaxUncertainty;
+
+        struct UncertaintyMatch
+        {
+            int curIdx;
+            int refIdx;
+            float cost;
+        };
+
+        void ComputeJointFrameUncertainty(Frame &currentFrame, KeyFrame *pRefKF);
+
+        bool BuildSparseUncertaintyMatches(Frame &currentFrame, KeyFrame *pRefKF, std::vector<UncertaintyMatch> &matches);
+
+        void OptimizeJointUncertainty(Frame &currentFrame, KeyFrame *pRefKF, const std::vector<UncertaintyMatch> &matches);
 
     private:
-        bool ProjectMapPointToFrame(MapPoint* pMP, KeyFrame* pKF, float &u, float &v) const;
+        bool ProjectMapPointToFrame(MapPoint *pMP, KeyFrame *pKF, float &u, float &v) const;
     };
 }
 

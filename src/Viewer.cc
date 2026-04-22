@@ -167,10 +167,12 @@ void Viewer::Run()
     cv::startWindowThread();
     cv::namedWindow("ORB-SLAM3: Current Frame", cv::WINDOW_NORMAL);
     cv::resizeWindow("ORB-SLAM3: Current Frame", static_cast<int>(mImageWidth), static_cast<int>(mImageHeight));
-    cv::moveWindow("ORB-SLAM3: Current Frame", 40, 40);
+    cv::moveWindow("ORB-SLAM3: Current Frame", 100, 500);
     cv::waitKey(1);
 
-    pangolin::CreateWindowAndBind("ORB-SLAM3: Map Viewer",1024,768);
+    pangolin::WindowInterface& mapWindow =
+        pangolin::CreateWindowAndBind("ORB-SLAM3: Map Viewer",1024,768);
+    mapWindow.Move(1000, 1000);
 
     // 3D Mouse handler requires depth testing to be enabled
     glEnable(GL_DEPTH_TEST);
